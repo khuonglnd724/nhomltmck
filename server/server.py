@@ -5,7 +5,7 @@ from datetime import datetime
 import threading
 
 class FileUploadServer:
-    def __init__(self, host='0.0.0.0', port=9999, max_buffer=8192):
+    def __init__(self, host='127.0.0.1', port=9999, max_buffer=8192):
         self.host = host
         self.port = port
         self.max_buffer = max_buffer
