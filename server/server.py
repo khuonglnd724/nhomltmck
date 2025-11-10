@@ -5,12 +5,17 @@ from datetime import datetime
 import threading
 
 class FileUploadServer:
-    def __init__(self, host='127.0.0.1', port=9999, max_buffer=8192):
+    def __init__(self, host='127.0.0.1', port=9999, max_buffer=8192, upload_dir='uploads'):
         self.host = host
         self.port = port
         self.max_buffer = max_buffer
         self.server_socket = None
-        self.upload_dir = 'uploads'
+        self.upload_dir = upload_dir
+        self.upload_stats = {
+            'total_files': 0,
+            'total_bytes': 0,
+            'active_connections': 0
+        }
         self.ensure_upload_directory()
 
     def ensure_upload_directory(self):
@@ -20,31 +25,54 @@ class FileUploadServer:
 
     def start(self):
         """Start the server and listen for connections"""
-        self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.server_socket.bind((self.host, self.port))
-        self.server_socket.listen(5)
-        print(f"Server started on {self.host}:{self.port}")
+        try:
+            self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            self.server_socket.bind((self.host, self.port))
+            self.server_socket.listen(5)
+            print(f"[SERVER] Started on {self.host}:{self.port}")
+            print(f"[SERVER] Upload directory: {os.path.abspath(self.upload_dir)}")
+            print(f"[SERVER] Waiting for connections...")
 
-        while True:
-            client_socket, address = self.server_socket.accept()
-            print(f"Connection from {address}")
-            client_thread = threading.Thread(
-                target=self.handle_client,
-                args=(client_socket, address)
-            )
-            client_thread.start()
+            while True:
+                try:
+                    client_socket, address = self.server_socket.accept()
+                    self.upload_stats['active_connections'] += 1
+                    print(f"[CONNECTION] Client connected from {address} (Active: {self.upload_stats['active_connections']})")
+                    
+                    client_thread = threading.Thread(
+                        target=self.handle_client,
+                        args=(client_socket, address)
+                    )
+                    client_thread.daemon = True
+                    client_thread.start()
+                except KeyboardInterrupt:
+                    print("\n[SERVER] Shutting down...")
+                    break
+                except Exception as e:
+                    print(f"[ERROR] Accept error: {e}")
+        except Exception as e:
+            print(f"[ERROR] Server start failed: {e}")
+        finally:
+            self.stop()
 
     def handle_client(self, client_socket, address):
         """Handle individual client connections"""
+        filename = "unknown"
+        start_time = datetime.now()
+        
         try:
             # Receive file metadata
             metadata_raw = self.receive_data(client_socket)
             if not metadata_raw:
+                print(f"[{address}] No metadata received")
                 return
 
             metadata = json.loads(metadata_raw.decode('utf-8'))
             filename = metadata['filename']
             filesize = metadata['filesize']
+            
+            print(f"[{address}] Receiving file: {filename} ({filesize/1024:.2f} KB)")
 
             # Send acknowledgment
             client_socket.send(b"READY")
@@ -65,22 +93,43 @@ class FileUploadServer:
                     progress = int((received_size / filesize) * 100)
                     client_socket.send(str(progress).encode())
 
+            # Calculate upload time and speed
+            elapsed_time = (datetime.now() - start_time).total_seconds()
+            speed = (received_size / 1024 / 1024) / elapsed_time if elapsed_time > 0 else 0
+
             # Send completion message
             if received_size == filesize:
-                response = {"status": "success", "message": "File uploaded successfully"}
+                response = {
+                    "status": "success", 
+                    "message": "File uploaded successfully",
+                    "filename": filename,
+                    "size": received_size,
+                    "time": elapsed_time,
+                    "speed": speed
+                }
+                self.upload_stats['total_files'] += 1
+                self.upload_stats['total_bytes'] += received_size
+                print(f"[{address}] ✓ Upload completed: {filename} ({speed:.2f} MB/s)")
             else:
-                response = {"status": "error", "message": "Upload incomplete"}
+                response = {
+                    "status": "error", 
+                    "message": f"Upload incomplete ({received_size}/{filesize} bytes)"
+                }
+                print(f"[{address}] ✗ Upload incomplete: {filename}")
             
             client_socket.send(json.dumps(response).encode())
 
         except Exception as e:
             error_msg = {"status": "error", "message": str(e)}
+            print(f"[{address}] ✗ Error handling {filename}: {e}")
             try:
                 client_socket.send(json.dumps(error_msg).encode())
             except:
                 pass
         finally:
+            self.upload_stats['active_connections'] -= 1
             client_socket.close()
+            print(f"[{address}] Connection closed (Active: {self.upload_stats['active_connections']})")
 
     def receive_data(self, client_socket):
         """Receive data with length prefix"""
@@ -104,13 +153,20 @@ class FileUploadServer:
 
     def stop(self):
         """Stop the server"""
+        print(f"\n[SERVER] Shutting down...")
+        print(f"[STATS] Total files received: {self.upload_stats['total_files']}")
+        print(f"[STATS] Total bytes received: {self.upload_stats['total_bytes']/1024/1024:.2f} MB")
         if self.server_socket:
             self.server_socket.close()
+        print(f"[SERVER] Stopped")
 
 if __name__ == "__main__":
+    print("="*60)
+    print("FILE UPLOAD SERVER - Member 3")
+    print("="*60)
     server = FileUploadServer()
     try:
         server.start()
     except KeyboardInterrupt:
-        print("\nShutting down server...")
+        print("\n[INTERRUPT] Received shutdown signal")
         server.stop()
