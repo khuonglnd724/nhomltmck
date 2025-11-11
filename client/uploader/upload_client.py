@@ -1,8 +1,10 @@
 import os
 import sys
 import json
+import time
 from typing import Callable
 from .connection import ServerConnection
+import concurrent.futures
 
 # Import FileQueue từ Member 2
 try:
@@ -65,7 +67,7 @@ class UploadClient:
                     raise ConnectionError("Server not ready to receive file")
 
                 # Upload file in chunks
-                start_time = os.times().elapsed
+                start_time = time.perf_counter()
                 uploaded_size = 0
 
                 with open(filepath, 'rb') as f:
@@ -78,7 +80,7 @@ class UploadClient:
                         uploaded_size += len(chunk)
 
                         # Calculate progress and speed
-                        elapsed_time = os.times().elapsed - start_time
+                        elapsed_time = time.perf_counter() - start_time
                         progress = int((uploaded_size / filesize) * 100)
                         speed = (uploaded_size / 1024 / 1024) / elapsed_time if elapsed_time > 0 else 0
                         
@@ -136,7 +138,8 @@ class UploadClient:
     def upload_from_queue(self, file_queue, 
                          progress_callback: Callable[[str, int, float, str], None] = None,
                          status_callback: Callable[[str, str, str], None] = None,
-                         complete_callback: Callable[[str, dict], None] = None) -> list:
+                         complete_callback: Callable[[str, dict], None] = None,
+                         max_workers: int = 1) -> list:
         """
         Upload tất cả file từ FileQueue (Member 2)
         
@@ -158,52 +161,88 @@ class UploadClient:
         
         results = []
         
-        # Lấy file từ queue và upload
-        while True:
-            file_item = file_queue.get_next()
-            if not file_item:
-                break
-            
-            file_path = file_item['path']
-            filename = os.path.basename(file_path)
-            
-            # Wrapper cho progress callback để thêm thông tin file
-            def wrapped_progress(progress, speed, status):
-                if progress_callback:
-                    progress_callback(file_path, progress, speed, status)
-            
-            # Wrapper cho status callback
-            def wrapped_status(status, message):
-                if status_callback:
-                    status_callback(file_path, status, message)
-            
-            # Upload file
-            try:
-                result = self.upload_file(
-                    file_path,
-                    progress_callback=wrapped_progress,
-                    status_callback=wrapped_status
-                )
-                
-                results.append({
-                    'file': file_path,
-                    'filename': filename,
-                    'result': result
-                })
-                
-                # Callback khi hoàn thành file
-                if complete_callback:
-                    complete_callback(file_path, result)
-                    
-            except Exception as e:
-                error_result = {'status': 'error', 'message': str(e)}
-                results.append({
-                    'file': file_path,
-                    'filename': filename,
-                    'result': error_result
-                })
-                if complete_callback:
-                    complete_callback(file_path, error_result)
+        # If max_workers == 1, behave sequentially (compatible behavior)
+        if max_workers <= 1:
+            while True:
+                file_item = file_queue.get_next()
+                if not file_item:
+                    break
+
+                file_path = file_item['path']
+                filename = os.path.basename(file_path)
+
+                # Wrapper cho progress callback để thêm thông tin file
+                def wrapped_progress(progress, speed, status, _file_path=file_path):
+                    if progress_callback:
+                        progress_callback(_file_path, progress, speed, status)
+
+                # Wrapper cho status callback
+                def wrapped_status(status, message, _file_path=file_path):
+                    if status_callback:
+                        status_callback(_file_path, status, message)
+
+                # Upload file
+                try:
+                    result = self.upload_file(
+                        file_path,
+                        progress_callback=wrapped_progress,
+                        status_callback=wrapped_status
+                    )
+
+                    results.append({
+                        'file': file_path,
+                        'filename': filename,
+                        'result': result
+                    })
+
+                    # Callback khi hoàn thành file
+                    if complete_callback:
+                        complete_callback(file_path, result)
+
+                except Exception as e:
+                    error_result = {'status': 'error', 'message': str(e)}
+                    results.append({
+                        'file': file_path,
+                        'filename': filename,
+                        'result': error_result
+                    })
+                    if complete_callback:
+                        complete_callback(file_path, error_result)
+        else:
+            # Parallel execution using ThreadPoolExecutor. Member 4 can choose max_workers.
+            futures = []
+            with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as ex:
+                while True:
+                    file_item = file_queue.get_next()
+                    if not file_item:
+                        break
+                    file_path = file_item['path']
+                    filename = os.path.basename(file_path)
+
+                    def task(path=file_path):
+                        # inner wrapped callbacks for this task
+                        def wrapped_progress(p, speed, status):
+                            if progress_callback:
+                                progress_callback(path, p, speed, status)
+
+                        def wrapped_status(s, msg):
+                            if status_callback:
+                                status_callback(path, s, msg)
+
+                        return self.upload_file(path, progress_callback=wrapped_progress, status_callback=wrapped_status)
+
+                    futures.append((ex.submit(task), file_path, filename))
+
+                # Collect results as they complete
+                for fut, file_path, filename in futures:
+                    try:
+                        result = fut.result()
+                    except Exception as e:
+                        result = {'status': 'error', 'message': str(e)}
+
+                    results.append({'file': file_path, 'filename': filename, 'result': result})
+                    if complete_callback:
+                        complete_callback(file_path, result)
         
         return results
 

@@ -1,6 +1,7 @@
 import socket
 import os
 import json
+import uuid
 from datetime import datetime
 import threading
 
@@ -77,8 +78,15 @@ class FileUploadServer:
             # Send acknowledgment
             client_socket.send(b"READY")
 
-            # Receive and save file
-            save_path = os.path.join(self.upload_dir, filename)
+            # Sanitize filename and prepare save path
+            safe_name = os.path.basename(filename)
+            base, ext = os.path.splitext(safe_name)
+            # avoid overwrite: add uuid if file exists
+            candidate = safe_name
+            save_path = os.path.join(self.upload_dir, candidate)
+            if os.path.exists(save_path):
+                candidate = f"{base}_{uuid.uuid4().hex}{ext}"
+                save_path = os.path.join(self.upload_dir, candidate)
             received_size = 0
             
             with open(save_path, 'wb') as f:
