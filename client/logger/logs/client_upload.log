@@ -1,0 +1,4 @@
+2025-11-12 22:55:42 - INFO - Test thông tin
+2025-11-12 22:55:42 - ERROR - Test lỗi
+2025-11-12 22:55:42 - INFO - UPLOAD SUCCESS - file_demo.txt (1024 bytes)
+2025-11-12 22:55:42 - ERROR - UPLOAD FAILED - file_demo.txt - ERROR: Connection error
