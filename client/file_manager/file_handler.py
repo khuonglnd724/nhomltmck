@@ -2,7 +2,7 @@
 import os
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
-from file_queue import FileQueue
+from .file_queue import FileQueue
 
 class FileHandlerGUI:
     """Giao diện xử lý kéo thả & chọn file"""

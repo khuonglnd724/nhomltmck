@@ -1,8 +1,3 @@
-"""
-Progress Bar Component
-Member 1 - GUI Component
-Hiển thị progress bar và tốc độ upload cho từng file
-"""
 
 import tkinter as tk
 from tkinter import ttk
