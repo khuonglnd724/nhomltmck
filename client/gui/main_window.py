@@ -1,104 +1,314 @@
-import tkinter as tk
-from tkinter import ttk, filedialog, messagebox
-import os
-import threading
-import time
+"""
+Main Window GUI - Multi File Uploader
+Member 1 - GUI Component
+"""
 
-from async_controller.thread_manager import ThreadManager
-from uploader.upload_client import UploadClient  # chắc chắn file này là upload_client.py
+import tkinter as tk
+from tkinter import filedialog, messagebox
+import os
+import sys
+import threading
+
+# Setup path
+current_dir = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.dirname(current_dir))
+
+# Import modules
+try:
+    from tkinterdnd2 import DND_FILES, TkinterDnD
+    HAS_DND = True
+except:
+    HAS_DND = False
+
+try:
+    from gui.progress_bar import ProgressBarManager
+    from file_manager.file_handler import FileHandler
+    from file_manager.file_queue import FileQueue
+    from uploader.upload_client import UploadClient
+    from async_controller.thread_manager import ThreadManager
+    from logger.logger import Logger
+    MODULES = True
+except ImportError as e:
+    print(f"⚠️ Import error: {e}")
+    ProgressBarManager = FileHandler = FileQueue = None
+    UploadClient = ThreadManager = Logger = None
+    MODULES = False
 
 
 class MainWindow:
+    """Cửa sổ chính ứng dụng upload"""
+    
+    # Colors
+    C = {
+        'bg': '#1e1e2e', 'bg2': '#2d2d44', 'accent': '#7c3aed',
+        'success': '#10b981', 'danger': '#ef4444', 'warning': '#f59e0b',
+        'text': '#e0e0e0', 'muted': '#9ca3af'
+    }
+    
     def __init__(self, root):
         self.root = root
-        self.root.title("Multi File Uploader - Member 4 GUI")
-        self.root.geometry("700x400")
-        self.root.configure(bg="#f2f2f2")
-
-        # --- Top buttons ---
-        top_frame = tk.Frame(root, bg="#f2f2f2")
-        top_frame.pack(fill="x", padx=10, pady=10)
-
-        tk.Button(top_frame, text="➕ Thêm file", command=self.add_files).pack(side="left", padx=5)
-        tk.Button(top_frame, text="🚀 Bắt đầu Upload", command=self.start_upload).pack(side="left", padx=5)
-        tk.Button(top_frame, text="❌ Thoát", command=self.on_close).pack(side="right", padx=5)
-
-        # --- Table ---
-        self.tree = ttk.Treeview(root, columns=("name", "status", "progress", "speed"), show="headings")
-        self.tree.heading("name", text="Tên file")
-        self.tree.heading("status", text="Trạng thái")
-        self.tree.heading("progress", text="Tiến độ (%)")
-        self.tree.heading("speed", text="Tốc độ (KB/s)")
-
-        self.tree.column("name", width=250)
-        self.tree.column("status", width=100)
-        self.tree.column("progress", width=100, anchor="center")
-        self.tree.column("speed", width=100, anchor="center")
-
-        self.tree.pack(fill="both", expand=True, padx=10, pady=5)
-
-        # --- Drag and drop hint ---
-        label = tk.Label(root, text="Kéo & thả file vào đây để thêm", bg="#f2f2f2", fg="gray")
-        label.pack(pady=5)
-
-        # --- Setup uploader and thread manager ---
-        # Sửa host/port cho đúng với UploadClient
-        self.uploader = UploadClient(host="127.0.0.1", port=9999)
-        self.thread_manager = ThreadManager(self.uploader, max_workers=3, gui_update_cb=self.gui_update)
-
-        self.file_map = {}  # file_id -> path
-
-        # --- Close handler ---
+        self.root.title("🚀 Multi File Uploader Pro")
+        self.root.geometry("900x600")
+        self.root.configure(bg=self.C['bg'])
+        
+        self.file_map = {}
+        self.is_uploading = False
+        
+        # Init components
+        self.logger = Logger() if Logger else None
+        self.file_handler = FileHandler() if FileHandler else None
+        self.file_queue = FileQueue() if FileQueue else None
+        
+        if self.logger:
+            self.logger.log("App started")
+        
+        # Build UI
+        self.build_ui()
+        self.setup_uploader()
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
-    # -------------------------------
+    def build_ui(self):
+        """Xây dựng giao diện"""
+        # Header
+        self.make_frame(self.root, self.C['bg2'], 'x', 80, False).pack(fill='x')
+        self.make_label(self.root.winfo_children()[-1], "🚀 Multi File Uploader Pro", 
+                       20, True, pady=10)
+        self.make_label(self.root.winfo_children()[-1], 
+                       "Kéo & thả file hoặc click • Upload đồng thời", 9)
+        
+        # Drop Zone
+        drop_f = self.make_frame(self.root, self.C['bg'])
+        drop_f.pack(fill='x', padx=20, pady=15)
+        
+        self.drop_zone = tk.Frame(drop_f, bg=self.C['bg2'], relief='solid', bd=2,
+                                 highlightthickness=2, highlightbackground=self.C['accent'])
+        self.drop_zone.pack(fill='x', ipady=30)
+        
+        self.make_label(self.drop_zone, "📁 Kéo & thả file vào đây", 14, True, pady=5)
+        self.make_label(self.drop_zone, "hoặc click để chọn file", 10)
+        
+        self.drop_zone.bind("<Button-1>", lambda e: self.add_files())
+        
+        if HAS_DND and hasattr(self.drop_zone, 'drop_target_register'):
+            try:
+                self.drop_zone.drop_target_register(DND_FILES)
+                self.drop_zone.dnd_bind('<<Drop>>', self.on_drop)
+            except:
+                pass
+        
+        # Progress Section
+        prog_f = self.make_frame(self.root, self.C['bg'])
+        prog_f.pack(fill='both', expand=True, padx=20, pady=10)
+        self.make_label(prog_f, "📋 Danh sách file", 12, True, anchor='w').pack(fill='x', pady=(0,10))
+        
+        if ProgressBarManager:
+            self.progress_manager = ProgressBarManager(prog_f)
+        else:
+            self.progress_manager = None
+            self.file_listbox = tk.Listbox(prog_f, bg=self.C['bg2'], fg=self.C['text'])
+            self.file_listbox.pack(fill='both', expand=True)
+        
+        # Controls
+        ctrl = self.make_frame(self.root, self.C['bg'])
+        ctrl.pack(fill='x', padx=20, pady=15)
+        
+        left = self.make_frame(ctrl, self.C['bg'])
+        left.pack(side='left')
+        self.make_btn(left, "➕ Thêm", self.add_files, self.C['accent'])
+        self.btn_start = self.make_btn(left, "🚀 Upload", self.start_upload, self.C['success'])
+        
+        right = self.make_frame(ctrl, self.C['bg'])
+        right.pack(side='right')
+        self.btn_cancel = self.make_btn(right, "⏸️ Dừng", self.cancel_upload, 
+                                       self.C['warning'], 'disabled')
+        self.make_btn(right, "🗑️ Xóa", self.clear_list, self.C['danger'])
+        
+        # Status Bar
+        status = self.make_frame(self.root, self.C['bg2'], 'x', 35, False)
+        status.pack(fill='x', side='bottom')
+        self.status_label = self.make_label(status, "📋 Sẵn sàng | 0 file", 9, 
+                                           anchor='w', side='left', padx=15, expand=True)
+
+    def make_frame(self, parent, bg, fill='both', h=None, prop=True):
+        """Helper: tạo frame"""
+        f = tk.Frame(parent, bg=bg)
+        if h:
+            f.configure(height=h)
+            if not prop:
+                f.pack_propagate(False)
+        return f
+
+    def make_label(self, parent, text, size=10, bold=False, **pack_kw):
+        """Helper: tạo label"""
+        l = tk.Label(parent, text=text, font=("Segoe UI", size, "bold" if bold else ""),
+                    bg=parent['bg'], fg=self.C['text'] if size > 10 else self.C['muted'])
+        l.pack(**pack_kw)
+        return l
+
+    def make_btn(self, parent, text, cmd, color, state='normal'):
+        """Helper: tạo button"""
+        b = tk.Button(parent, text=text, command=cmd, bg=color, fg='white',
+                     font=("Segoe UI", 10, "bold"), relief='flat', padx=20, 
+                     pady=10, cursor='hand2', state=state)
+        b.pack(side='left', padx=5)
+        return b
+
+    def setup_uploader(self):
+        """Thiết lập uploader"""
+        if MODULES and all([UploadClient, ThreadManager]):
+            try:
+                self.uploader = UploadClient(host="127.0.0.1", port=9999)
+                self.thread_manager = ThreadManager(self.uploader, max_workers=3,
+                                                   gui_update_cb=self.gui_update)
+                if self.logger:
+                    self.logger.log("Modules loaded")
+                print("✅ Ready")
+            except Exception as e:
+                self.uploader = self.thread_manager = None
+                messagebox.showerror("Lỗi", f"Không khởi tạo được:\n{e}")
+                if self.logger:
+                    self.logger.log(str(e), "ERROR")
+        else:
+            self.uploader = self.thread_manager = None
+            messagebox.showwarning("Demo Mode", "⚠️ Chế độ DEMO\nThiếu modules upload")
+            if self.logger:
+                self.logger.log("Demo mode", "WARNING")
+
+    def on_drop(self, event):
+        """Drop files"""
+        for path in self.root.tk.splitlist(event.data):
+            if os.path.isfile(path):
+                self.add_single_file(path)
+
     def add_files(self):
-        files = filedialog.askopenfilenames(title="Chọn file để upload")
-        for path in files:
-            file_id = self.thread_manager.add_file(path)
-            self.file_map[file_id] = path
-            self.tree.insert("", "end", iid=file_id, values=(os.path.basename(path), "Chờ xử lý", "0%", "0.0"))
+        """Chọn files"""
+        for path in filedialog.askopenfilenames(title="Chọn file"):
+            self.add_single_file(path)
+
+    def add_single_file(self, path):
+        """Thêm 1 file"""
+        if not os.path.exists(path):
+            return
+        
+        # Validate
+        if self.file_handler and not self.file_handler.validate_file(path):
+            messagebox.showwarning("Lỗi", f"File không hợp lệ!")
+            return
+        
+        # Add to queue
+        fid = self.file_queue.add_file(path) if self.file_queue else f"f{len(self.file_map)}"
+        
+        if self.thread_manager:
+            self.thread_manager.add_file(path)
+        
+        self.file_map[fid] = path
+        
+        # UI
+        if self.progress_manager:
+            self.progress_manager.add_progress_bar(fid, os.path.basename(path), 
+                                                   os.path.getsize(path))
+        else:
+            self.file_listbox.insert(tk.END, os.path.basename(path))
+        
+        self.update_status()
+        if self.logger:
+            self.logger.log(f"Added: {os.path.basename(path)}")
 
     def start_upload(self):
+        """Bắt đầu upload"""
         if not self.file_map:
-            messagebox.showwarning("Chưa có file", "Vui lòng thêm ít nhất 1 file để upload.")
-            return
-        messagebox.showinfo("Bắt đầu", "Đang tải lên... Xem tiến trình bên dưới.")
-        # Bắt đầu upload bằng ThreadManager
+            return messagebox.showwarning("Lỗi", "Chưa có file!")
+        if not self.thread_manager:
+            return messagebox.showerror("Lỗi", "Upload chưa sẵn sàng!")
+        
+        self.is_uploading = True
+        self.toggle_buttons(False)
+        self.status_label.config(text="🚀 Đang tải lên...")
+        
+        if self.logger:
+            self.logger.log("Upload started")
+        
         threading.Thread(target=self.thread_manager.start, daemon=True).start()
 
-    # -------------------------------
+    def cancel_upload(self):
+        """Dừng upload"""
+        if self.thread_manager and messagebox.askyesno("Xác nhận", "Dừng upload?"):
+            self.thread_manager.stop(wait=False)
+            self.toggle_buttons(True)
+            self.status_label.config(text="⏸️ Đã dừng")
+            if self.logger:
+                self.logger.log("Cancelled")
+
+    def clear_list(self):
+        """Xóa danh sách"""
+        if self.is_uploading:
+            return messagebox.showwarning("Lỗi", "Đang upload!")
+        
+        if self.file_map and messagebox.askyesno("Xác nhận", "Xóa danh sách?"):
+            if self.progress_manager:
+                self.progress_manager.clear_all()
+            else:
+                self.file_listbox.delete(0, tk.END)
+            
+            self.file_map.clear()
+            if self.file_queue:
+                self.file_queue.clear()
+            
+            self.update_status()
+            if self.logger:
+                self.logger.log("List cleared")
+
     def gui_update(self, event_type, payload):
         """Callback từ ThreadManager"""
+        fid = payload.get("id")
+        
+        if not self.progress_manager:
+            return
+        
         if event_type == "progress":
-            fid = payload["id"]
-            uploaded = payload["uploaded"]
-            total = payload["total"] or 1
-            percent = int((uploaded / total) * 100)
-            speed = round(payload.get("speed", 0.0) / 1024, 1)
-            self.tree.set(fid, "progress", f"{percent}%")
-            self.tree.set(fid, "speed", f"{speed}")
-            self.tree.set(fid, "status", payload.get("status", "Uploading"))
-
+            self.progress_manager.update_progress(fid, payload["uploaded"],
+                                                 payload["total"], payload.get("speed", 0))
         elif event_type == "status":
-            fid = payload["id"]
-            status = payload.get("status", "")
-            self.tree.set(fid, "status", status)
+            status_map = {"waiting": "waiting", "uploading": "uploading",
+                         "completed": "completed", "error": "error"}
+            self.progress_manager.set_status(fid, status_map.get(
+                payload.get("status", "").lower(), "uploading"))
+        elif event_type == "completed":
+            self.toggle_buttons(True)
+            self.status_label.config(text="✅ Hoàn thành!")
+            messagebox.showinfo("Thành công", "Upload xong!")
+            if self.logger:
+                self.logger.log("Completed")
 
-        elif event_type == "added":
-            fid = payload["id"]
-            path = payload["path"]
-            self.tree.insert("", "end", iid=fid, values=(os.path.basename(path), "Chờ xử lý", "0%", "0.0"))
+    def toggle_buttons(self, enable):
+        """Bật/tắt buttons"""
+        self.is_uploading = not enable
+        self.btn_start.config(state='normal' if enable else 'disabled')
+        self.btn_cancel.config(state='disabled' if enable else 'normal')
+        self.btn_add.config(state='normal' if enable else 'disabled')
+        self.btn_clear.config(state='normal' if enable else 'disabled')
 
-    # -------------------------------
+    def update_status(self):
+        """Cập nhật status"""
+        self.status_label.config(text=f"📋 Sẵn sàng | {len(self.file_map)} file")
+
     def on_close(self):
-        if messagebox.askyesno("Thoát", "Bạn có chắc muốn thoát chương trình không?"):
-            self.thread_manager.stop(wait=False)
+        """Đóng app"""
+        if self.is_uploading and not messagebox.askyesno("Cảnh báo", "Đang upload. Thoát?"):
+            return
+        if messagebox.askyesno("Thoát", "Thoát chương trình?"):
+            if self.thread_manager:
+                self.thread_manager.stop(wait=False)
+            if self.logger:
+                self.logger.log("App closed")
             self.root.destroy()
 
 
-# -------------------------------
-if __name__ == "__main__":
-    root = tk.Tk()
-    app = MainWindow(root)
+def main():
+    root = TkinterDnD.Tk() if HAS_DND else tk.Tk()
+    MainWindow(root)
     root.mainloop()
+
+
+if __name__ == "__main__":
+    main()
