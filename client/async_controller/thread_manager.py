@@ -1,4 +1,5 @@
 import threading
+import os
 from queue import Queue, Empty
 import time
 import uuid
@@ -21,9 +22,13 @@ class ThreadManager:
         self._workers_started = False
         self._file_map = {}  # file_id -> file_info
 
-    def add_file(self, path, meta=None):
-        """Thêm file vào hàng đợi"""
-        file_id = str(uuid.uuid4())
+    def add_file(self, path, meta=None, file_id=None):
+        """Thêm file vào hàng đợi. Nếu `file_id` được cung cấp thì dùng id đó,
+        để đồng bộ với `FileQueue` và GUI."""
+        file_id = file_id or str(uuid.uuid4())
+        # If file already known, return existing id
+        if file_id in self._file_map:
+            return file_id
         file_info = {
             'id': file_id,
             'path': path,
@@ -31,14 +36,13 @@ class ThreadManager:
             'status': 'queued',
             'uploaded': 0,
             'progress': 0,
-            'speed': 0.0
+            'speed': 0.0,
+            'size': os.path.getsize(path) if os.path.exists(path) else 0
         }
         self._file_map[file_id] = file_info
         self.queue.put(file_info)
         if self.gui_update_cb:
             self.gui_update_cb('added', file_info.copy())
-        if not self._workers_started:
-            self.start_workers()
         return file_id
 
     def _progress_callback(self, file_id, progress, speed, status):
@@ -46,14 +50,28 @@ class ThreadManager:
         fi = self._file_map.get(file_id)
         if not fi:
             return
+        # progress: percentage (0-100) from UploadClient
         fi['progress'] = progress
         fi['speed'] = speed
         fi['status'] = status
+
+        # Convert to GUI-friendly shape: uploaded bytes, total bytes, speed in bytes/s
+        total = fi.get('size', 0) or 0
+        uploaded = int((progress / 100.0) * total) if total else 0
+        # UploadClient reports speed in MB/s; convert to bytes/s
+        try:
+            speed_bytes = float(speed) * 1024 * 1024
+        except Exception:
+            speed_bytes = 0.0
+
+        fi['uploaded'] = uploaded
+
         if self.gui_update_cb:
             self.gui_update_cb('progress', {
                 'id': file_id,
-                'progress': progress,
-                'speed': speed,
+                'uploaded': uploaded,
+                'total': total,
+                'speed': speed_bytes,
                 'status': status
             })
 
@@ -92,13 +110,67 @@ class ThreadManager:
             finally:
                 self.queue.task_done()
 
+    def _session_worker(self, work_queue: Queue):
+        """Worker for a single upload session.
+
+        Processes items from `work_queue` only. When the work_queue is empty,
+        the worker exits. This ensures files added after session start are
+        not uploaded until the next session begins.
+        """
+        while not self._stop_event.is_set():
+            try:
+                file_info = work_queue.get(timeout=1)
+            except Empty:
+                # If no more items, exit the session worker
+                break
+
+            fid = file_info['id']
+            path = file_info['path']
+            file_info['status'] = 'uploading'
+            if self.gui_update_cb:
+                self.gui_update_cb('status', {'id': fid, 'status': 'uploading'})
+
+            try:
+                result = self.uploader.upload_file(
+                    filepath=path,
+                    progress_callback=lambda p, s, st: self._progress_callback(fid, p, s, st),
+                    status_callback=lambda st, msg: self.gui_update_cb('status', {'id': fid, 'status': st, 'message': msg})
+                )
+
+                file_info['status'] = result.get('status', 'done')
+                if self.gui_update_cb:
+                    self.gui_update_cb('status', {'id': fid, 'status': file_info['status'], 'result': result})
+
+            except Exception as e:
+                file_info['status'] = 'error'
+                file_info['error_msg'] = str(e)
+                if self.gui_update_cb:
+                    self.gui_update_cb('status', {'id': fid, 'status': 'error', 'error_msg': str(e)})
+
+            finally:
+                work_queue.task_done()
+
     def start_workers(self):
         """Khởi tạo các luồng upload"""
-        if self._workers_started:
-            return
-        self._workers_started = True
+        # Start a new upload session: move all currently queued items into a
+        # session-specific work queue and spawn threads to process that queue.
+        # Files added after this call remain in `self.queue` for the next session.
+        work_q = Queue()
+
+        # Drain current queue into work_q (non-blocking)
+        while True:
+            try:
+                item = self.queue.get_nowait()
+            except Empty:
+                break
+            work_q.put(item)
+
+        if work_q.empty():
+            return  # nothing to do
+
+        # spawn session-specific workers
         for i in range(self.max_workers):
-            t = threading.Thread(target=self.worker, daemon=True, name=f"uploader-worker-{i}")
+            t = threading.Thread(target=self._session_worker, args=(work_q,), daemon=True, name=f"uploader-session-worker-{i}")
             t.start()
             self.threads.append(t)
 
