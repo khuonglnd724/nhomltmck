@@ -2,6 +2,8 @@
 # Member 2 - File Queue (chuẩn theo MainWindow)
 
 import queue
+import time
+import uuid
 import uuid
 
 class FileQueue:
@@ -12,22 +14,26 @@ class FileQueue:
         self._files = {}  # Lưu trữ file theo id -> thông tin
 
     def add_file(self, file_path: str):
-        """Thêm file mới vào hàng đợi, trả về id duy nhất nếu thành công"""
-        # Kiểm tra trùng file theo đường dẫn
-        for f in self._files.values():
-            if f['path'] == file_path:
-                return None  # Đã tồn tại
+        """Add a file to the queue.
 
-        fid = str(uuid.uuid4())
+        Returns a generated `file_id` string if added, or `False` if the path
+        already exists in the queue.
+        """
+        # Kiểm tra trùng file theo đường dẫn
+        existing_paths = [f.get('path') for f in self._files.values()]
+        if file_path in existing_paths:
+            return False  # Đã tồn tại
+
+        file_id = f"fq_{int(time.time()*1000)}_{len(existing_paths)}"
         file_info = {
-            'id': fid,
+            'id': file_id,
             'path': file_path,
             'status': 'pending'
         }
 
-        self._files[fid] = file_info
+        self._files[file_id] = file_info
         self._queue.put(file_info)
-        return fid
+        return file_id
 
     def get_next(self):
         """Lấy file tiếp theo trong hàng đợi"""
