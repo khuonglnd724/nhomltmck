@@ -4,6 +4,14 @@ import json
 import uuid
 from datetime import datetime
 import threading
+from typing import Optional
+
+# Optional database integration (lazy import to avoid hard dependency if disabled)
+try:
+    from database.db_manager import DB, DatabaseManager  # type: ignore
+except Exception:  # database folder may be absent or not initialized
+    DB = None  # type: ignore
+    DatabaseManager = None  # type: ignore
 
 # Read server configuration. Try both package-style and local imports so the
 # script works when executed from the project root (`python -m server.server`)
@@ -46,7 +54,7 @@ except Exception:
 
 
 class FileUploadServer:
-    def __init__(self, host=None, port=None, max_buffer=8192, upload_dir=None):
+    def __init__(self, host=None, port=None, max_buffer=8192, upload_dir=None, enable_db: bool | None = None):
         # Use config values by default
         self.host = host or SERVER_HOST
         self.port = port or SERVER_PORT
@@ -60,6 +68,18 @@ class FileUploadServer:
             'active_connections': 0
         }
         self.ensure_upload_directory()
+        # Database toggle (defaults to env ENABLE_DB or parameter)
+        env_flag = os.getenv("ENABLE_DB", "false").lower() == "true"
+        self.enable_db = enable_db if enable_db is not None else env_flag
+        self.db: Optional[DatabaseManager] = None
+        if self.enable_db and DB is not None:
+            try:
+                # initialize manager
+                self.db = DB  # already instantiated singleton
+                print("[DB] Database integration enabled")
+            except Exception as e:
+                print(f"[DB] Failed to initialize database: {e}")
+                self.db = None
 
     def ensure_upload_directory(self):
         """Create uploads directory if it doesn't exist"""
@@ -78,6 +98,12 @@ class FileUploadServer:
             print(f"[SERVER] Started on {self.host}:{self.port}")
             print(f"[SERVER] Upload directory: {self.upload_dir}")
             print(f"[SERVER] Waiting for connections... (backlog={backlog})")
+            if self.enable_db and self.db:
+                try:
+                    stats = self.db.get_stats()
+                    print(f"[DB] Current stats: files={stats['total_files']} bytes={stats['total_bytes']}")
+                except Exception as e:
+                    print(f"[DB] Stats fetch failed: {e}")
 
             while True:
                 try:
@@ -104,6 +130,9 @@ class FileUploadServer:
         """Handle individual client connections"""
         filename = "unknown"
         start_time = datetime.now()
+        user_id = 0  # placeholder until auth added
+        file_record_id = None
+        session_id = None
 
         try:
             # apply per-connection timeout if configured
@@ -121,6 +150,10 @@ class FileUploadServer:
             metadata = json.loads(metadata_raw.decode('utf-8'))
             filename = metadata.get('filename', 'unknown')
             filesize = int(metadata.get('filesize', 0))
+            try:
+                user_id = int(metadata.get('user_id', 0) or 0)
+            except Exception:
+                user_id = 0
 
             # Enforce max file size limit from config
             try:
@@ -134,6 +167,14 @@ class FileUploadServer:
                 return
 
             print(f"[{address}] Receiving file: {filename} ({filesize/1024:.2f} KB)")
+            # Create DB file record & session if enabled
+            if self.enable_db and self.db:
+                try:
+                    file_record_id = self.db.create_file_record(user_id, filename, filename, filesize, None)
+                    session_id = self.db.start_session(user_id, file_record_id, address[0])
+                    self.db.update_file_status(file_record_id, 'in_progress')
+                except Exception as e:
+                    print(f"[DB] Failed to create file/session record: {e}")
 
             # Send acknowledgment
             try:
@@ -142,34 +183,25 @@ class FileUploadServer:
                 print(f"[{address}] Failed to send READY")
                 return
 
-            # Sanitize filename and prepare save path
-            safe_name = os.path.basename(filename)
-            base, ext = os.path.splitext(safe_name)
-            candidate = safe_name
-            save_path = os.path.join(self.upload_dir, candidate)
-            if os.path.exists(save_path):
-                candidate = f"{base}_{uuid.uuid4().hex}{ext}"
-                save_path = os.path.join(self.upload_dir, candidate)
-
+            # Không lưu file vào disk - chỉ nhận và discard data
             received_size = 0
-            with open(save_path, 'wb') as f:
-                while received_size < filesize:
-                    try:
-                        data = client_socket.recv(min(self.max_buffer, filesize - received_size))
-                    except socket.timeout:
-                        raise TimeoutError("Connection timed out while receiving file data")
-                    if not data:
-                        break
-                    f.write(data)
-                    received_size += len(data)
+            while received_size < filesize:
+                try:
+                    data = client_socket.recv(min(self.max_buffer, filesize - received_size))
+                except socket.timeout:
+                    raise TimeoutError("Connection timed out while receiving file data")
+                if not data:
+                    break
+                # Không ghi file - chỉ đếm bytes
+                received_size += len(data)
 
-                    # Send progress acknowledgment
-                    progress = int((received_size / filesize) * 100) if filesize else 100
-                    try:
-                        client_socket.send(str(progress).encode())
-                    except Exception:
-                        # If client disconnects, stop receiving
-                        break
+                # Send progress acknowledgment
+                progress = int((received_size / filesize) * 100) if filesize else 100
+                try:
+                    client_socket.send(str(progress).encode())
+                except Exception:
+                    # If client disconnects, stop receiving
+                    break
 
             # Calculate upload time and speed
             elapsed_time = (datetime.now() - start_time).total_seconds()
@@ -188,12 +220,25 @@ class FileUploadServer:
                 self.upload_stats['total_files'] += 1
                 self.upload_stats['total_bytes'] += received_size
                 print(f"[{address}] ✓ Upload completed: {filename} ({speed:.2f} MB/s)")
+                if self.enable_db and self.db and file_record_id is not None:
+                    try:
+                        self.db.update_file_status(file_record_id, 'success')
+                        self.db.finalize_session(session_id, 'success', received_size)
+                        self.db.update_daily_stats(received_size, user_id)
+                    except Exception as e:
+                        print(f"[DB] Finalize error: {e}")
             else:
                 response = {
                     "status": "error",
                     "message": f"Upload incomplete ({received_size}/{filesize} bytes)"
                 }
                 print(f"[{address}] ✗ Upload incomplete: {filename}")
+                if self.enable_db and self.db and file_record_id is not None:
+                    try:
+                        self.db.update_file_status(file_record_id, 'error')
+                        self.db.finalize_session(session_id, 'error', received_size, 'incomplete')
+                    except Exception as e:
+                        print(f"[DB] Finalize error: {e}")
 
             try:
                 client_socket.send(json.dumps(response).encode())
@@ -207,6 +252,13 @@ class FileUploadServer:
                 client_socket.send(json.dumps(error_msg).encode())
             except Exception:
                 pass
+            if self.enable_db and self.db and file_record_id is not None:
+                try:
+                    self.db.update_file_status(file_record_id, 'error')
+                    if session_id:
+                        self.db.finalize_session(session_id, 'error', 0, str(e))
+                except Exception as db_e:
+                    print(f"[DB] Error record failed: {db_e}")
         finally:
             try:
                 self.upload_stats['active_connections'] -= 1

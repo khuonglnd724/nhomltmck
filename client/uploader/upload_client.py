@@ -19,12 +19,13 @@ except ImportError:
         FileQueue = None  # Fallback nếu không tìm thấy
 
 class UploadClient:
-    def __init__(self, host='127.0.0.1', port=9999):
+    def __init__(self, host='127.0.0.1', port=9999, user_id: int | None = None):
         self.host = host
         self.port = port
         self.chunk_size = 8192
         self._cancel_flag = False
         self.current_upload = None
+        self.user_id = user_id
 
     def upload_file(self, filepath: str, 
                    progress_callback: Callable[[int, float, str], None] = None,
@@ -55,7 +56,8 @@ class UploadClient:
                 # Send file metadata
                 metadata = {
                     "filename": filename,
-                    "filesize": filesize
+                    "filesize": filesize,
+                    "user_id": int(self.user_id) if isinstance(self.user_id, int) else 0
                 }
                 connection.send_data(metadata)
 

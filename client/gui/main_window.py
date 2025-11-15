@@ -51,6 +51,8 @@ class MainWindow:
         self.file_map = {}
         self.is_uploading = False
         self.upload_thread = None
+        self.user_id = 0
+        self.username = "Guest"
         
         # Init components
         from client.logger.logger import client_logger
@@ -71,7 +73,25 @@ class MainWindow:
         # Header
         header = self.make_frame(self.root, self.C['bg2'], 'x', 80, False)
         header.pack(fill='x')
-        self.make_label(header, "🚀 Multi File Uploader Pro", 20, True, pady=10)
+        top_row = tk.Frame(header, bg=self.C['bg2'])
+        top_row.pack(fill='x')
+        self.make_label(top_row, "🚀 Multi File Uploader Pro", 20, True, pady=10)
+        # Login area
+        right_box = tk.Frame(top_row, bg=self.C['bg2'])
+        right_box.pack(side='right', padx=10)
+        self.lbl_user = tk.Label(right_box, text=f"👤 {self.username}", font=("Segoe UI", 9),
+                      bg=self.C['bg2'], fg=self.C['muted'])
+        self.lbl_user.pack(side='left', padx=(0,6))
+        self.btn_logout = tk.Button(right_box, text="🚪 Đăng xuất", command=self.logout_user,
+                        bg=self.C['danger'], fg='white', font=("Segoe UI", 9, 'bold'), relief='flat')
+        self.btn_logout.pack(side='right')
+        self.btn_register = tk.Button(right_box, text="🆕 Đăng ký", command=self.register_dialog,
+                          bg=self.C['warning'], fg='white', font=("Segoe UI", 9, 'bold'), relief='flat')
+        self.btn_register.pack(side='right', padx=(6,0))
+        self.btn_login = tk.Button(right_box, text="🔐 Đăng nhập", command=self.login_dialog,
+                        bg=self.C['accent'], fg='white', font=("Segoe UI", 9, 'bold'), relief='flat')
+        self.btn_login.pack(side='right', padx=(0,6))
+
         self.make_label(header, "Kéo & thả file hoặc click • Upload đồng thời", 9)
 
         # Drop Zone
@@ -185,7 +205,7 @@ class MainWindow:
 
     # --- Upload ---
     def setup_uploader(self):
-        self.uploader = UploadClient(host="127.0.0.1", port=9999)
+        self.uploader = UploadClient(host="127.0.0.1", port=9999, user_id=self.user_id)
         self.thread_manager = ThreadManager(self.uploader, max_workers=3,
                                            gui_update_cb=self.gui_update)
         self.logger.log("Uploader ready")
@@ -297,6 +317,92 @@ class MainWindow:
             self.status_label.config(text="✅ Hoàn thành!")
             # Keep this non-blocking; log completion
             self.logger.log("Completed")
+
+    # --- Auth ---
+    def login_dialog(self):
+        """Đăng nhập qua MySQL (tùy chọn). Yêu cầu ENABLE_DB=true và cấu hình DB hợp lệ."""
+        try:
+            import tkinter.simpledialog as sd
+            from services.user_service import authenticate_user
+        except Exception as e:
+            messagebox.showerror("DB", f"Không thể tải module DB/Services: {e}")
+            return
+
+        username = sd.askstring("Đăng nhập", "Tên đăng nhập:")
+        if not username:
+            return
+        password = sd.askstring("Đăng nhập", "Mật khẩu:", show='*')
+        if password is None:
+            return
+
+        try:
+            uid = authenticate_user(username, password)
+        except Exception as e:
+            messagebox.showerror("DB", f"Lỗi kết nối DB: {e}")
+            return
+
+        if uid:
+            self.user_id = int(uid)
+            self.username = username
+            self.lbl_user.config(text=f"👤 {self.username}")
+            # propagate into uploader
+            try:
+                self.uploader.user_id = self.user_id
+            except Exception:
+                pass
+            messagebox.showinfo("Đăng nhập", "Đăng nhập thành công!")
+        else:
+            messagebox.showwarning("Đăng nhập", "Sai thông tin đăng nhập!")
+
+    def register_dialog(self):
+        """Đăng ký tài khoản mới trong MySQL (tùy chọn)."""
+        try:
+            import tkinter.simpledialog as sd
+            from services.user_service import register_user, authenticate_user
+        except Exception as e:
+            messagebox.showerror("DB", f"Không thể tải module DB/Services: {e}")
+            return
+
+        username = sd.askstring("Đăng ký", "Chọn tên đăng nhập:")
+        if not username:
+            return
+        password = sd.askstring("Đăng ký", "Mật khẩu:", show='*')
+        if password is None or password == "":
+            return
+        confirm = sd.askstring("Đăng ký", "Nhập lại mật khẩu:", show='*')
+        if confirm is None or confirm != password:
+            messagebox.showwarning("Đăng ký", "Mật khẩu không khớp!")
+            return
+
+        try:
+            uid = register_user(username, password)
+            if uid:
+                messagebox.showinfo("Đăng ký", "Tạo tài khoản thành công! Sẽ đăng nhập ngay.")
+                # Auto-login
+                auth_uid = authenticate_user(username, password)
+                if auth_uid:
+                    self.user_id = int(auth_uid)
+                    self.username = username
+                    self.lbl_user.config(text=f"👤 {self.username}")
+                    try:
+                        self.uploader.user_id = self.user_id
+                    except Exception:
+                        pass
+            else:
+                messagebox.showwarning("Đăng ký", "Không thể tạo tài khoản. Tên có thể đã tồn tại.")
+        except Exception as e:
+            messagebox.showerror("Đăng ký", f"Lỗi DB: {e}")
+
+    def logout_user(self):
+        """Đăng xuất người dùng hiện tại, quay về chế độ Guest."""
+        self.user_id = 0
+        self.username = "Guest"
+        self.lbl_user.config(text=f"👤 {self.username}")
+        try:
+            self.uploader.user_id = 0
+        except Exception:
+            pass
+        messagebox.showinfo("Đăng xuất", "Bạn đã đăng xuất.")
 
     def toggle_buttons(self, enable):
         self.is_uploading = not enable
