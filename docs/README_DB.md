@@ -95,7 +95,4 @@ print(DB.get_stats())
 - Thêm bảng api_tokens (token truy cập dịch vụ ngoài)
 - Thêm cơ chế soft delete cho files
 
----
-**Version:** 1.0  
-**Date:** 2025-11-15  
-**Author:** GitHub Copilot
+

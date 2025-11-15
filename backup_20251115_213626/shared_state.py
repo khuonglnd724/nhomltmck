@@ -1,12 +1,11 @@
-"""Shared state module to allow HTTP layer to report TCP server status
-and access multicast monitor.
+"""Shared state module to allow HTTP layer to report TCP server status.
 
 The combined runner will set `tcp_server` to the active instance of
-`FileUploadServer` and `multicast_monitor` to the active MulticastMonitor.
-The FastAPI app can then read lightweight stats without tight coupling.
+`FileUploadServer`. The FastAPI app can then read lightweight stats
+without tight coupling.
 """
 from __future__ import annotations
-from typing import Optional, Any
+from typing import Optional
 
 try:
     from server.server import FileUploadServer  # when imported as package
@@ -17,4 +16,3 @@ except Exception:  # pragma: no cover
         FileUploadServer = None  # type: ignore
 
 tcp_server: Optional[FileUploadServer] = None
-multicast_monitor: Optional[Any] = None  # MulticastMonitor instance if enabled

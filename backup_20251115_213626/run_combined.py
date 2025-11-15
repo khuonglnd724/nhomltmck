@@ -1,4 +1,4 @@
-"""Run TCP, UDP, HTTP/HTTPS, and Multicast Monitoring together.
+"""Run both the TCP socket server and the FastAPI HTTP/HTTPS API together.
 
 Usage (PowerShell):
   pip install -r requirements.txt
@@ -16,7 +16,6 @@ from __future__ import annotations
 import os
 import threading
 import uvicorn
-import time
 
 from server.server import FileUploadServer
 from server import shared_state
@@ -27,12 +26,6 @@ try:
 except Exception:
     UDPServer = None  # type: ignore
 
-# Optional Multicast import; only used when ENABLE_MULTICAST
-try:
-    from server.multicast_monitor import MulticastMonitor
-except Exception:
-    MulticastMonitor = None  # type: ignore
-
 # Load config with fallbacks
 try:
     from server.server_config import (
@@ -41,11 +34,6 @@ try:
         HTTP_PORT as CFG_HTTP_PORT,
         ENABLE_UDP as CFG_ENABLE_UDP,
         UDP_PORT as CFG_UDP_PORT,
-        ENABLE_MULTICAST as CFG_ENABLE_MULTICAST,
-        MULTICAST_GROUP as CFG_MULTICAST_GROUP,
-        MULTICAST_PORT as CFG_MULTICAST_PORT,
-        MULTICAST_INTERVAL as CFG_MULTICAST_INTERVAL,
-        MULTICAST_TTL as CFG_MULTICAST_TTL,
     )
 except Exception:
     CFG_TCP_PORT = 9999
@@ -53,44 +41,11 @@ except Exception:
     CFG_HTTP_PORT = 8000
     CFG_ENABLE_UDP = True
     CFG_UDP_PORT = 9998
-    CFG_ENABLE_MULTICAST = True
-    CFG_MULTICAST_GROUP = "239.0.0.1"
-    CFG_MULTICAST_PORT = 5555
-    CFG_MULTICAST_INTERVAL = 3.0
-    CFG_MULTICAST_TTL = 2
 
 
 def start_tcp():
     tcp = FileUploadServer()
     shared_state.tcp_server = tcp
-    
-    # Start multicast monitoring if enabled
-    enable_mcast_env = os.getenv("ENABLE_MULTICAST")
-    if enable_mcast_env is not None:
-        enable_mcast = enable_mcast_env.lower() in ("1", "true", "yes")
-    else:
-        enable_mcast = bool(CFG_ENABLE_MULTICAST)
-    
-    if enable_mcast and MulticastMonitor is not None:
-        mcast_group = os.getenv("MULTICAST_GROUP", CFG_MULTICAST_GROUP)
-        mcast_port = int(os.getenv("MULTICAST_PORT", str(CFG_MULTICAST_PORT)))
-        mcast_interval = float(os.getenv("MULTICAST_INTERVAL", str(CFG_MULTICAST_INTERVAL)))
-        mcast_ttl = int(os.getenv("MULTICAST_TTL", str(CFG_MULTICAST_TTL)))
-        
-        monitor = MulticastMonitor(
-            tcp,
-            multicast_group=mcast_group,
-            multicast_port=mcast_port,
-            interval_seconds=mcast_interval,
-            ttl=mcast_ttl
-        )
-        monitor.start()
-        shared_state.multicast_monitor = monitor
-    elif enable_mcast:
-        print("[Multicast] Module not available; skipping multicast monitoring")
-    else:
-        print("[Multicast] Disabled by configuration (ENABLE_MULTICAST=false)")
-    
     tcp.start()  # blocking loop until shutdown
 
 
@@ -120,15 +75,11 @@ def start_http():
 
 def main():
     print("=" * 70)
-    print("Combined TCP + UDP + Multicast + HTTP/HTTPS Server")
+    print("Combined TCP + UDP + HTTP/HTTPS Server")
     print("=" * 70)
     # Start TCP server in background daemon thread
     t_tcp = threading.Thread(target=start_tcp, name="TCPServerThread", daemon=True)
     t_tcp.start()
-    
-    # Give TCP server time to initialize before starting UDP
-    time.sleep(0.5)
-    
     # Start UDP server based on config/env flag
     enable_udp_env = os.getenv("ENABLE_UDP")
     if enable_udp_env is not None:
@@ -141,7 +92,6 @@ def main():
         t_udp.start()
     else:
         print("[UDP] Disabled by configuration (ENABLE_UDP=false)")
-    
     # Start HTTP server (blocking)
     start_http()
 
