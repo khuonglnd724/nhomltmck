@@ -51,7 +51,7 @@ class MainWindow:
         self.file_map = {}
         self.is_uploading = False
         self.upload_thread = None
-        self.user_id = 0
+        self.user_id = 1  # Guest user_id in database
         self.username = "Guest"
         
         # Init components
@@ -79,6 +79,7 @@ class MainWindow:
         # Login area
         right_box = tk.Frame(top_row, bg=self.C['bg2'])
         right_box.pack(side='right', padx=10)
+        # Đã bỏ nút "Tìm server" theo yêu cầu
         self.lbl_user = tk.Label(right_box, text=f"👤 {self.username}", font=("Segoe UI", 9),
                       bg=self.C['bg2'], fg=self.C['muted'])
         self.lbl_user.pack(side='left', padx=(0,6))
@@ -274,15 +275,19 @@ class MainWindow:
 
     def _process_gui_update(self, event_type, payload):
         fid = payload.get("id")
+        # Bổ sung log chi tiết cho mọi trạng thái
+        import logging
+        logger = logging.getLogger("main_window_upload")
         if event_type == "progress":
-            # payload: {'id', 'uploaded', 'total', 'speed', 'status'}
             uploaded = payload.get("uploaded", 0)
             total = payload.get("total", 0) or 1
             speed = payload.get("speed", 0)
+            logger.info(f"Progress: {fid} {uploaded}/{total} bytes, speed: {speed} B/s")
             self.progress_manager.update_progress(fid, uploaded, total, speed)
         elif event_type == "status":
-            # Normalize a variety of status strings that may come from UploadClient
             raw = payload.get("status", "").lower()
+            msg = payload.get("message", "")
+            logger.info(f"Status update: {fid} status={raw} msg={msg}")
             if raw in ("waiting", "queued"):
                 mapped = "waiting"
             elif raw in ("uploading", "in_progress"):
@@ -291,31 +296,33 @@ class MainWindow:
                 mapped = "completed"
             elif raw in ("cancelled", "canceled"):
                 mapped = "error"
+            elif raw in ("error",):
+                mapped = "error"
             else:
                 mapped = "uploading"
 
-            # Update progress bar status
             self.progress_manager.set_status(fid, mapped)
 
-            # If upload completed, finalize UI state for this file
             if mapped == "completed":
-                # Ensure progress shows 100%
                 pb = self.progress_manager.get_progress_bar(fid)
                 if pb:
                     try:
                         pb.update_progress(pb.file_size, pb.file_size, pb.speed)
                     except Exception:
-                        pass
-
-                # If no other uploads running, toggle buttons and show message
+                        logger.warning(f"Progress bar update error for {fid}")
                 self.toggle_buttons(True)
                 self.status_label.config(text="✅ Hoàn thành!")
-                # Don't spam modal dialogs for every file; log instead
                 self.logger.log(f"Completed: {fid}")
+            elif mapped == "error":
+                self.toggle_buttons(True)
+                self.status_label.config(text=f"❌ Lỗi upload: {msg}")
+                self.logger.log(f"Error: {fid} - {msg}")
+            elif mapped == "uploading":
+                self.status_label.config(text="🚀 Đang tải lên...")
         elif event_type == "completed":
+            logger.info(f"Completed event: {fid}")
             self.toggle_buttons(True)
             self.status_label.config(text="✅ Hoàn thành!")
-            # Keep this non-blocking; log completion
             self.logger.log("Completed")
 
     # --- Auth ---
@@ -395,14 +402,16 @@ class MainWindow:
 
     def logout_user(self):
         """Đăng xuất người dùng hiện tại, quay về chế độ Guest."""
-        self.user_id = 0
+        self.user_id = 1  # Guest user_id in database
         self.username = "Guest"
         self.lbl_user.config(text=f"👤 {self.username}")
         try:
-            self.uploader.user_id = 0
+            self.uploader.user_id = 1  # Guest user_id in database
         except Exception:
             pass
         messagebox.showinfo("Đăng xuất", "Bạn đã đăng xuất.")
+
+    # Đã bỏ hàm discover_servers theo yêu cầu
 
     def toggle_buttons(self, enable):
         self.is_uploading = not enable

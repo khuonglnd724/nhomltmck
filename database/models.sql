@@ -14,8 +14,9 @@ CREATE TABLE users (
 ) ENGINE=InnoDB;
 
 -- Insert Guest user with user_id=0 for anonymous uploads
+-- Insert Guest user with user_id=1 for anonymous uploads
 INSERT INTO users (user_id, username, password_hash, quota_mb, is_active) 
-VALUES (0, 'Guest', 'N/A', 9999999, 1);
+VALUES (1, 'Guest', 'N/A', 9999999, 1);
 
 DROP TABLE IF EXISTS files;
 CREATE TABLE files (

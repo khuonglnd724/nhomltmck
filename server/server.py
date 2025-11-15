@@ -151,9 +151,9 @@ class FileUploadServer:
             filename = metadata.get('filename', 'unknown')
             filesize = int(metadata.get('filesize', 0))
             try:
-                user_id = int(metadata.get('user_id', 0) or 0)
+                user_id = int(metadata.get('user_id', 1) or 1)  # Default to Guest user_id=1
             except Exception:
-                user_id = 0
+                user_id = 1  # Fallback to Guest
 
             # Enforce max file size limit from config
             try:
@@ -167,14 +167,20 @@ class FileUploadServer:
                 return
 
             print(f"[{address}] Receiving file: {filename} ({filesize/1024:.2f} KB)")
+            print(f"[DB] enable_db={self.enable_db}, db={self.db}, user_id={user_id}")
             # Create DB file record & session if enabled
             if self.enable_db and self.db:
                 try:
                     file_record_id = self.db.create_file_record(user_id, filename, filename, filesize, None)
+                    print(f"[DB] Created file record: file_id={file_record_id}")
                     session_id = self.db.start_session(user_id, file_record_id, address[0])
+                    print(f"[DB] Started session: session_id={session_id}")
                     self.db.update_file_status(file_record_id, 'in_progress')
+                    print(f"[DB] Updated file status to 'in_progress'")
                 except Exception as e:
                     print(f"[DB] Failed to create file/session record: {e}")
+                    import traceback
+                    traceback.print_exc()
 
             # Send acknowledgment
             try:
@@ -183,7 +189,7 @@ class FileUploadServer:
                 print(f"[{address}] Failed to send READY")
                 return
 
-            # Không lưu file vào disk - chỉ nhận và discard data
+            # Nhận file data (không lưu vào disk, chỉ lưu metadata vào DB)
             received_size = 0
             while received_size < filesize:
                 try:
@@ -192,7 +198,7 @@ class FileUploadServer:
                     raise TimeoutError("Connection timed out while receiving file data")
                 if not data:
                     break
-                # Không ghi file - chỉ đếm bytes
+                # Chỉ đếm bytes, không ghi file
                 received_size += len(data)
 
                 # Send progress acknowledgment
@@ -222,11 +228,17 @@ class FileUploadServer:
                 print(f"[{address}] ✓ Upload completed: {filename} ({speed:.2f} MB/s)")
                 if self.enable_db and self.db and file_record_id is not None:
                     try:
+                        print(f"[DB] Finalizing: file_id={file_record_id}, session_id={session_id}, size={received_size}")
                         self.db.update_file_status(file_record_id, 'success')
+                        print(f"[DB] Updated file status to 'success'")
                         self.db.finalize_session(session_id, 'success', received_size)
+                        print(f"[DB] Finalized session")
                         self.db.update_daily_stats(received_size, user_id)
+                        print(f"[DB] Updated daily stats")
                     except Exception as e:
                         print(f"[DB] Finalize error: {e}")
+                        import traceback
+                        traceback.print_exc()
             else:
                 response = {
                     "status": "error",

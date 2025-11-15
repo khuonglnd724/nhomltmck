@@ -19,8 +19,9 @@ CREATE TABLE users (
 ) ENGINE=InnoDB;
 
 -- Insert Guest user với user_id=0 cho anonymous uploads
-INSERT INTO users (user_id, username, password_hash, quota_mb, is_active) 
-VALUES (0, 'Guest', 'N/A', 9999999, 1);
+-- Insert Guest user với user_id=1 cho anonymous uploads
+INSERT INTO users (user_id, username, password_hash, quota_mb, is_active)
+VALUES (1, 'Guest', 'N/A', 9999999, 1);
 
 CREATE TABLE files (
   file_id INT AUTO_INCREMENT PRIMARY KEY,
@@ -65,4 +66,4 @@ CREATE INDEX idx_files_status ON files(status);
 CREATE INDEX idx_sessions_user ON upload_sessions(user_id);
 CREATE INDEX idx_sessions_file ON upload_sessions(file_id);
 
-SELECT 'Database reset complete. Guest user created with user_id=0' AS Status;
+SELECT 'Database reset complete. Guest user created with user_id=1' AS Status;
