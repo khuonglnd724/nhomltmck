@@ -7,5 +7,8 @@ def create_file(user_id: int, original: str, stored: str, size_bytes: int, file_
 def update_file_status(file_id: int, status: str):
     DB.update_file_status(file_id, status)
 
+def update_file_size(file_id: int, size_bytes: int):
+    DB.update_file_size(file_id, size_bytes)
+
 def get_stats():
     return DB.get_stats()

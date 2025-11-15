@@ -73,6 +73,11 @@ class DatabaseManager:
         cur.execute("UPDATE files SET status=%s WHERE file_id=%s", (status, file_id))
         cn.commit(); cur.close(); cn.close()
 
+    def update_file_size(self, file_id: int, size_bytes: int):
+        cn = self._conn(); cur = cn.cursor()
+        cur.execute("UPDATE files SET file_size_bytes=%s WHERE file_id=%s", (size_bytes, file_id))
+        cn.commit(); cur.close(); cn.close()
+
     # ---- Session operations ----
     def start_session(self, user_id: int, file_id: int, ip: str | None) -> int:
         cn = self._conn(); cur = cn.cursor()

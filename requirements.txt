@@ -1,5 +1,5 @@
 mysql-connector-python==9.0.0
-# Future HTTP server (uncomment when starting REST layer)
-# fastapi==0.115.0
-# uvicorn==0.32.0
-# python-multipart==0.0.9  # for form uploads
+fastapi==0.115.0
+uvicorn==0.32.0
+python-multipart==0.0.9  # for form uploads
+requests==2.32.3
