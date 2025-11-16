@@ -1,26 +1,27 @@
-# Kiến trúc Hybrid: TCP + UDP + HTTP
+# Kiến Trúc Hybrid: TCP + UDP + HTTP + Multicast
 
-## Tại sao kết hợp 3 protocols?
+## Vì Sao Kết Hợp Nhiều Giao Thức?
 
-### Nguyên tắc: "Right tool for the right job"
+### Nguyên tắc: "Dùng đúng công cụ cho đúng việc"
 
-Mỗi protocol có điểm mạnh riêng:
+Mỗi giao thức có thế mạnh riêng:
 
-| Protocol | Điểm mạnh | Điểm yếu | Use case |
-|----------|-----------|----------|----------|
-| **TCP** | Reliable 100%, ordered | High latency (handshake) | File upload lớn |
-| **UDP** | Low latency, no handshake | Unreliable, no order | Discovery, ping, pre-check |
-| **HTTP** | Standard, firewall-friendly, tooling | Overhead, stateless | API, web integration |
+| Protocol | Điểm mạnh | Điểm yếu | Tình huống dùng |
+|----------|-----------|----------|-----------------|
+| **TCP** | Tin cậy tuyệt đối, có thứ tự | Handshake ban đầu | Upload file lớn |
+| **UDP** | Độ trễ thấp, không handshake | Không đảm bảo tin cậy | Discovery, ping, pre-check |
+| **HTTP** | Chuẩn, dễ tích hợp, qua firewall | Overhead, stateless | API quản lý, web/mobile |
+| **Multicast** | Phát 1 lần nhiều nơi nhận | Không xác nhận từng client | Giám sát realtime |
 
 ---
 
-## Chi tiết kết hợp trong dự án
+## Cách Áp Dụng Trong Dự Án
 
-### 1. UDP Discovery → TCP Upload
+### 1. UDP Discovery → Chuẩn Bị TCP Upload
 
-**Vấn đề:** Client phải biết trước IP server (không tự động)
+**Vấn đề:** Client phải nhập IP/port thủ công (dễ sai, tốn thời gian)
 
-**Giải pháp UDP:**
+**Giải pháp (UDP broadcast):**
 ```
 [Server] ------broadcast------> [LAN] (mỗi 5s)
    "FileServer @ 192.168.1.100:9999"
@@ -31,17 +32,17 @@ Mỗi protocol có điểm mạnh riêng:
    → Kết nối TCP
 ```
 
-**Benchmark:**
-- Manual config: ~30s (nhập tay, có thể sai)
-- UDP discovery: ~0.5s (tự động, chính xác)
+**So sánh:**
+- Cấu hình tay: ~30s
+- UDP discovery tự động: ~0.5s
 
 ---
 
-### 2. UDP Pre-check → TCP Upload
+### 2. UDP Pre-check → Giảm Lãng Phí Kết Nối TCP
 
-**Vấn đề:** TCP handshake tốn thời gian, nếu server reject (file quá lớn) thì waste
+**Vấn đề:** TCP handshake tốn thời gian; nếu file bị từ chối thì phí kết nối
 
-**Giải pháp UDP:**
+**Giải pháp (UDP PRE_CHECK):**
 ```python
 # Trước (chỉ TCP):
 1. TCP connect         50ms  ┐
@@ -80,11 +81,11 @@ def upload_file(self, filepath, ...):
 
 ---
 
-### 3. UDP Ping → Health check
+### 3. UDP Ping → Kiểm Tra Sống (Health)
 
-**Vấn đề:** TCP health check cần handshake (slow)
+**Vấn đề:** Dùng TCP để kiểm tra độ trễ = tốn thêm handshake
 
-**Giải pháp UDP:**
+**Giải pháp (UDP PING/PONG):**
 ```
 TCP ping:
   SYN → SYN-ACK → ACK → Close
@@ -104,11 +105,11 @@ print(f"Server latency: {latency}ms")
 
 ---
 
-### 4. HTTP API → Management
+### 4. HTTP API → Quản Lý & Tích Hợp Ngoài
 
-**Vấn đề:** Desktop client khó tích hợp web/mobile
+**Vấn đề:** Desktop client thuần TCP khó tích hợp web/mobile
 
-**Giải pháp HTTP:**
+**Giải pháp (HTTP chuẩn REST):**
 ```javascript
 // Web client
 fetch('http://server.com/api/upload', {
@@ -128,56 +129,60 @@ axios.post('/api/upload', data)
 
 ---
 
-## Benchmark Performance
+## So Sánh Hiệu Năng (Ví Dụ)
 
-### Test case: Upload 10MB file
+### Trường hợp: Upload file 10MB
 
-| Scenario | Latency | Throughput |
-|----------|---------|------------|
-| **Manual config + TCP** | ~30s setup + 2s upload | 5 MB/s |
-| **UDP discovery + TCP** | ~0.5s setup + 2s upload | 5 MB/s |
-| **Saving:** | **29.5s faster** | - |
+| Kịch bản | Chuẩn bị | Thời gian upload | Tốc độ |
+|----------|----------|------------------|--------|
+| Manual + TCP | ~30s | ~2s | 5 MB/s |
+| UDP discovery + TCP | ~0.5s | ~2s | 5 MB/s |
+| Tiết kiệm | ~29.5s | - | - |
 
-### Test case: File rejected (too large)
+### Trường hợp: File bị từ chối (quá lớn)
 
-| Scenario | Wasted time |
-|----------|-------------|
-| **TCP only** | ~90ms (handshake + metadata + reject) |
-| **UDP pre-check** | ~20ms (validate + reject) |
-| **Saving:** | **70ms per rejected file** |
-
----
-
-## Khi nào dùng protocol nào?
-
-### Dùng TCP:
-- ✅ Upload file lớn (> 1MB)
-- ✅ Cần đảm bảo toàn vẹn dữ liệu
-- ✅ Qua Internet (UDP thường bị chặn)
-- ✅ Streaming có progress tracking
-
-### Dùng UDP:
-- ✅ Service discovery (broadcast)
-- ✅ Heartbeat/health check (low latency)
-- ✅ Pre-validation (fast fail)
-- ✅ Trong LAN (packet loss thấp)
-- ❌ KHÔNG dùng cho file lớn (unreliable)
-
-### Dùng HTTP:
-- ✅ Web/mobile integration
-- ✅ REST API standard
-- ✅ Public internet (firewall-friendly)
-- ✅ Authentication/management
-- ❌ KHÔNG dùng cho custom protocol (overhead cao)
+| Kịch bản | Thời gian lãng phí |
+|----------|-------------------|
+| Chỉ TCP | ~90ms |
+| Có UDP pre-check | ~20ms |
+| Tiết kiệm | ~70ms / file |
 
 ---
 
-## Real-world scenario
+## Nên Dùng Giao Thức Nào Khi Nào?
 
-### Startup flow tối ưu:
+### TCP
+- Upload file lớn (>1MB)
+- Cần độ tin cậy tuyệt đối
+- Qua Internet (UDP dễ bị filter)
+- Có yêu cầu tracking tiến độ
+
+### UDP
+- Tìm server tự động (broadcast)
+- Ping nhanh độ trễ thấp
+- Pre-check metadata trước TCP
+- Mạng LAN ổn định
+- Không dùng để truyền file lớn
+
+### HTTP
+- Tích hợp web/mobile
+- REST chuẩn, dễ mở rộng
+- Qua firewall dễ dàng
+- Dùng cho xác thực / quản lý
+- Không tối ưu truyền file lớn tùy chỉnh
+
+### Multicast
+- Giám sát trạng thái realtime nhiều dashboard
+- Giảm tải so với mỗi dashboard phải tự hỏi (poll)
+
+---
+
+## Kịch Bản Thực Tế Tối Ưu
+
+### Luồng Khởi Động Nhanh:
 
 ```
-User mở app
+Người dùng mở ứng dụng
   ↓
 1. GUI click "🔍 Tìm server"
    → UDP broadcast discovery (0.5s)
@@ -204,15 +209,16 @@ User mở app
    → Display list
 ```
 
-**Total time:** ~11s (vs ~41s without UDP optimization)
+**Thời gian tổng:** ~11s (so với ~41s nếu không dùng UDP)
 
 ---
 
-## Kết luận
+## Kết Luận
 
-**Hybrid architecture = Best of all worlds:**
-- UDP: Fast discovery & validation
-- TCP: Reliable upload
-- HTTP: Standard API
+**Hybrid = Phối hợp điểm mạnh:**
+- UDP: Tìm & xác thực nhanh
+- TCP: Truyền tin cậy
+- HTTP: Quản lý & tích hợp
+- Multicast: Giám sát realtime hiệu quả
 
-**Không phải "so sánh" TCP vs UDP, mà là "kết hợp" để tối ưu!**
+Không chỉ “so sánh” mà là “kết hợp để tối ưu toàn diện”.

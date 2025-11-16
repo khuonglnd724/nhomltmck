@@ -59,8 +59,8 @@ def register(req: AuthRequest):
 @app.post("/api/login")
 def login(req: AuthRequest):
     if not CONFIG.enabled:
-        # Allow guest when DB off
-        return {"user_id": 0, "username": "Guest"}
+        # Cho phép Guest khi DB tắt (chuẩn hóa user_id=1)
+        return {"user_id": 1, "username": "Guest"}
     try:
         user_id: Optional[int] = user_service.authenticate_user(req.username, req.password)
         if user_id is None:

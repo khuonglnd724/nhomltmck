@@ -1,46 +1,51 @@
-# nhomltmck
+# Dự Án Upload File - Kiến Trúc Hybrid
 
-## Kiến trúc Hybrid TCP + UDP + HTTP/HTTPS
-
-Dự án tối ưu hiệu suất bằng cách kết hợp 3 protocols:
+## Tổng Quan
+Dự án minh họa cách kết hợp ba giao thức **TCP + UDP + HTTP/HTTPS** để tối ưu tốc độ, khả năng khám phá dịch vụ, và mở rộng về quản lý.
 
 ```
 ┌────────────────────────────────────────────────────┐
-│         Combined Server (run_combined.py)          │
+│      Server Kết Hợp (run_combined.py)              │
 ├────────────────────────────────────────────────────┤
-│  TCP (9999):   File upload chính (reliable)       │
-│  UDP (9998):   Discovery + Pre-check (fast)       │
-│  HTTP (8000):  REST API + Management               │
+│  TCP (9999):  Upload file chính (đáng tin cậy)     │
+│  UDP (9998):  Discovery + Ping + Pre-check         │
+│  HTTP (8000): REST API (health, auth, stats)       │
+│  Multicast:  Giám sát realtime (239.0.0.1:5555)    │
 └────────────────────────────────────────────────────┘
 ```
 
-### Vai trò từng protocol:
+### Vai Trò Từng Giao Thức
 
-**TCP (port 9999):**
-- Upload file lớn, đáng tin cậy 100%
-- Custom protocol với 8-byte length prefix
-- Progress tracking với ACK
-- Multi-threaded, connection-oriented
+**TCP (9999)**
+- Truyền file kích thước lớn
+- Đảm bảo thứ tự & toàn vẹn
+- Length prefix 8 byte + thread mỗi connection
+- Ghi file xuống `uploads/` + cập nhật DB (nếu bật)
 
-**UDP (port 9998):**
-- Service Discovery: broadcast tìm server tự động
-- Heartbeat/Ping: check server alive nhanh
-- Pre-check: validate file trước khi upload TCP (tiết kiệm 50-100ms)
-- Không cần handshake → latency thấp
+**UDP (9998 / broadcast 8888)**
+- Khám phá server (broadcast)
+- Ping đo độ trễ (unicast)
+- Pre-check nhanh metadata (unicast)
+- Không handshake → tiết kiệm thời gian kết nối ban đầu
 
-**HTTP/HTTPS (port 8000):**
-- REST API chuẩn cho web/mobile
-- Authentication (login/register)
-- File management (list, stats)
-- Optional HTTPS với TLS
+**HTTP/HTTPS (8000)**
+- API chuẩn: đăng ký, đăng nhập, upload (phiên bản HTTP), thống kê, danh sách file
+- Dễ tích hợp trình duyệt / mobile
+- Có thể bật HTTPS (ENV: ENABLE_HTTPS)
+
+**Multicast (239.0.0.1:5555)**
+- Phát số liệu trạng thái định kỳ (active connections, tổng file, bytes, uptime)
+- Nhiều dashboard nhận cùng lúc, không gây thêm tải đơn lẻ
 
 ---
 
-## Chạy server kết hợp
+## Khởi Chạy Server Kết Hợp
 
 ```powershell
 pip install -r requirements.txt
-$env:ENABLE_DB = "true"  # optional
+$env:ENABLE_DB = "true"    # bật DB (tuỳ chọn)
+$env:ENABLE_UDP = "true"   # bật UDP discovery
+$env:ENABLE_MULTICAST = "true"  # bật multicast
 python -m server.run_combined
 ```
 
@@ -57,29 +62,23 @@ INFO:     Uvicorn running on http://127.0.0.1:8000
 
 ---
 
-## UDP Optimization - Cách sử dụng
+## UDP - Khám Phá & Tối Ưu
 
-### 1. Service Discovery (Tìm server tự động)
+### 1. Service Discovery (Tìm server tự động qua broadcast)
 
-**Client GUI:**
-- Click nút "🔍 Tìm server"
-- UDP broadcast trong LAN
-- Auto-fill IP:port khi tìm thấy
-
-**Command-line:**
+**Command-line (Passive):**
 ```powershell
 python -m client.udp_discovery
 ```
+**Active discovery:**
+```powershell
+python -c "from client.udp_discovery import discover_servers_active; print(discover_servers_active())"
+```
+**Lợi ích:** Không cần nhập IP, hỗ trợ nhiều server, thời gian tìm < 1s.
 
-**Lợi ích:**
-- Không cần config IP thủ công
-- Phát hiện nhiều servers
-- Zero-configuration networking
-- Latency < 100ms
+### 2. UDP Pre-check (Xác thực sớm)
 
-### 2. UDP Pre-check (Fast validation)
-
-**Flow tối ưu:**
+**Luồng Tối Ưu:**
 ```
 1. Client --[UDP pre-check]--> Server (10ms)
    { "filename": "test.txt", "filesize": 1024000, "user_id": 1 }
@@ -108,7 +107,7 @@ Có UDP pre-check:
   Latency: ~20ms (fast fail)
 ```
 
-### 3. Heartbeat/Ping
+### 3. Ping (Heartbeat)
 
 ```powershell
 python -c "from client.udp_discovery import ping_server; print(f'{ping_server(\"127.0.0.1\")}ms')"
@@ -118,7 +117,7 @@ Output: `12.5ms` (vs TCP ping ~50ms)
 
 ---
 
-## HTTP/HTTPS Server
+## HTTP/HTTPS API
 
 - Install deps:
 
@@ -129,43 +128,24 @@ pip install -r requirements.txt
 - Run HTTP server:
 
 ```powershell
-python -m server.http_server
-- Combined TCP + HTTP demo (single process):
-
 ```powershell
-# Optional DB integration
-$env:ENABLE_DB = "true"
-python -m server.run_combined
-```
-
-Then test:
-- TCP uploads via existing desktop client (port 9999)
-- HTTP uploads via `POST /api/upload` (port 8000)
-- Check unified status: `GET http://127.0.0.1:8000/api/health` (includes TCP stats)
-
-```
-
-- Configure HTTPS (optional):
-	- Provide cert/key files and set env vars, then run:
-
-```powershell
-$env:ENABLE_HTTPS = "true"
-$env:SSL_CERTFILE = "C:\path\to\cert.pem"
-$env:SSL_KEYFILE = "C:\path\to\key.pem"
+# Chỉ HTTP (nếu muốn tách riêng)
 python -m server.http_server
+
+# Server kết hợp (TCP + UDP + Multicast + HTTP)
+$env:ENABLE_DB="true"; python -m server.run_combined
 ```
+Endpoints chính:
+- `GET /api/health`
+- `POST /api/register` {username, password}
+- `POST /api/login` {username, password}
+- `POST /api/upload` (multipart: file, user_id)
+- `GET /api/files?user_id=`
+- `GET /api/stats`
 
-- Endpoints:
-	- `GET /api/health`
-	- `POST /api/register` { username, password }
-	- `POST /api/login` { username, password }
-	- `POST /api/upload` multipart form: `file`, `user_id` (int, optional; default guest=0)
-	- `GET /api/files?user_id=...`
-	- `GET /api/stats`
+Ghi chú: Khi DB tắt (`ENABLE_DB=false`), upload HTTP vẫn hoạt động nhưng không ghi bản ghi vào DB.
 
-Note: When DB is disabled (`ENABLE_DB=false`), uploads still stream and succeed but only as metadata-less operations (no DB records).
-
-## HTTP Demo Client
+## Demo Client HTTP (tuỳ chọn nếu có)
 
 - Install deps:
 ```powershell
@@ -176,18 +156,9 @@ pip install -r requirements.txt
 ```powershell
 # Health
 python -m client.http_client health
-
-# Register & login
 python -m client.http_client register --username demo --password secret
 python -m client.http_client login --username demo --password secret
-
-# Upload as guest
-python -m client.http_client upload --file README.md --user-id 0
-
-# List files & stats
-python -m client.http_client files --user-id 0
+python -m client.http_client upload --file README.md --user-id 1
+python -m client.http_client files --user-id 1
 python -m client.http_client stats
-
-# Custom server URL
-$env:HTTP_SERVER_URL = "http://127.0.0.1:8000"; python -m client.http_client health
 ```

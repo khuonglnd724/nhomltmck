@@ -220,7 +220,7 @@ python -m server.multicast_dashboard
 
 Tất cả dashboard sẽ nhận cùng dữ liệu từ server.
 
-### Test 3: Nhiều Server (Advanced)
+### Test 3: Nhiều Server (Nâng Cao)
 
 Nếu có nhiều máy trong LAN:
 
@@ -263,7 +263,7 @@ Dashboard sẽ hiển thị cả 2 server.
 
 ---
 
-## 🐛 Troubleshooting
+## 🐛 Khắc Phục Sự Cố
 
 ### Dashboard không nhận được dữ liệu
 
@@ -297,7 +297,7 @@ Dashboard sẽ hiển thị cả 2 server.
 
 ---
 
-## ✅ Checklist Demo
+## ✅ Danh Sách Kiểm Demo
 
 Để demo multicast monitoring trong presentation:
 
