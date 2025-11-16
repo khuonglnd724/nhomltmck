@@ -189,25 +189,37 @@ class FileUploadServer:
                 print(f"[{address}] Failed to send READY")
                 return
 
-            # Nhận file data (không lưu vào disk, chỉ lưu metadata vào DB)
+            # Nhận file data và ghi xuống ổ đĩa tại UPLOAD_DIR
+            safe_name = os.path.basename(filename)
+            dest_path = os.path.join(self.upload_dir, safe_name)
             received_size = 0
-            while received_size < filesize:
-                try:
-                    data = client_socket.recv(min(self.max_buffer, filesize - received_size))
-                except socket.timeout:
-                    raise TimeoutError("Connection timed out while receiving file data")
-                if not data:
-                    break
-                # Chỉ đếm bytes, không ghi file
-                received_size += len(data)
+            try:
+                with open(dest_path, 'wb') as f_out:
+                    while received_size < filesize:
+                        try:
+                            data = client_socket.recv(min(self.max_buffer, filesize - received_size))
+                        except socket.timeout:
+                            raise TimeoutError("Connection timed out while receiving file data")
+                        if not data:
+                            break
+                        f_out.write(data)
+                        received_size += len(data)
 
-                # Send progress acknowledgment
-                progress = int((received_size / filesize) * 100) if filesize else 100
+                        # Send progress acknowledgment
+                        progress = int((received_size / filesize) * 100) if filesize else 100
+                        try:
+                            client_socket.send(str(progress).encode())
+                        except Exception:
+                            # If client disconnects, stop receiving progress updates
+                            pass
+            except Exception as io_e:
+                # Nếu lỗi IO, đảm bảo xóa file dở dang
                 try:
-                    client_socket.send(str(progress).encode())
+                    if os.path.exists(dest_path):
+                        os.remove(dest_path)
                 except Exception:
-                    # If client disconnects, stop receiving
-                    break
+                    pass
+                raise io_e
 
             # Calculate upload time and speed
             elapsed_time = (datetime.now() - start_time).total_seconds()
@@ -240,6 +252,12 @@ class FileUploadServer:
                         import traceback
                         traceback.print_exc()
             else:
+                # Upload incomplete: xóa file dở dang nếu có
+                try:
+                    if os.path.exists(dest_path):
+                        os.remove(dest_path)
+                except Exception:
+                    pass
                 response = {
                     "status": "error",
                     "message": f"Upload incomplete ({received_size}/{filesize} bytes)"

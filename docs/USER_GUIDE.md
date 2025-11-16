@@ -4,8 +4,8 @@
 > Ngôn ngữ triển khai: Python 3.11
 
 ## 1. Tổng Quan
-Hệ thống hỗ trợ nhiều giao thức để truyền và giám sát upload file:
-- TCP: Truyền file chính, ghi nhận metadata (không lưu nội dung file vào ổ đĩa nếu dùng chế độ metadata-only).
+ Hệ thống hỗ trợ nhiều giao thức để truyền và giám sát upload file:
+- TCP: Truyền file chính và ghi file thực tế xuống thư mục `uploads/` (đồng thời ghi metadata vào DB nếu bật DB).
 - HTTP/HTTPS (FastAPI): REST API cho đăng ký, đăng nhập, upload đơn giản, thống kê.
 - UDP: Khám phá server (discovery), heartbeat, quảng bá cổng dịch vụ.
 - Multicast: Giám sát real-time trạng thái server (tuân thủ syllabus tuần 7).
@@ -23,7 +23,7 @@ server/
   http_app.py            # Ứng dụng FastAPI
   multicast_monitor.py   # Broadcast multicast stats
   multicast_dashboard.py # Dashboard nhận stats
-client/
+ client/
   main.py                # GUI client (Tkinter)
   uploader/              # logic upload TCP
   async_controller/      # quản lý luồng
@@ -66,17 +66,17 @@ Chạy client:
 ```powershell
 python -m client.main
 ```
-Chức năng:
-- Chọn file -> đẩy vào hàng đợi
-- Upload qua TCP (gửi metadata + nội dung tuỳ chế độ)
-- Hiển thị progress bar
-- Hiển thị trạng thái kết nối
+ Chức năng:
+ - Chọn file -> đẩy vào hàng đợi
+ - Upload qua TCP (gửi metadata + nội dung)
+ - Hiển thị progress bar
+ - Hiển thị trạng thái kết nối
 
 ## 6. REST API Endpoints (HTTP)
-Ví dụ (giả định đã triển khai trong `http_app.py`):
+Ví dụ (đã triển khai trong `http_app.py`):
 - `POST /register` – Đăng ký user mới
 - `POST /login` – Đăng nhập, trả về token (nếu có)
-- `POST /upload` – Upload file đơn giản (metadata-only hoặc full)
+- `POST /upload` – Upload file đơn giản (ghi nội dung xuống `uploads/`)
 - `GET /files` – Liệt kê file đã upload
 - `GET /stats` – Thống kê tổng
 - `GET /health` – Kiểm tra tình trạng
@@ -85,6 +85,33 @@ Test nhanh bằng `curl`:
 ```powershell
 curl http://127.0.0.1:8000/health
 ```
+
+### 6.1. Test nhanh bằng curl
+```powershell
+# Health
+curl http://127.0.0.1:8000/api/health
+
+# Upload file (DB tắt: chỉ đo và trả metadata; DB bật: ghi metadata vào DB)
+curl -F "file=@path\to\file.txt" -F "user_id=1" http://127.0.0.1:8000/api/upload
+
+# Danh sách file (cần DB bật)
+curl "http://127.0.0.1:8000/api/files?user_id=1"
+
+# Thống kê (DB tắt sẽ trả 0/0)
+curl http://127.0.0.1:8000/api/stats
+```
+
+### 6.2. Chạy test HTTP tự động
+Đã thêm test tự động sử dụng FastAPI TestClient.
+
+```powershell
+$env:PYTHONPATH="."; python -m unittest -v tests.test_http_api
+```
+Test bao gồm:
+- `/api/health` trả `status=ok`
+- `/api/upload` nhận file thành công khi DB tắt
+- `/api/files` trả `503` khi DB tắt
+- `/api/stats` trả `0/0` khi DB tắt
 
 ## 7. UDP Discovery & Heartbeat
 Nếu `ENABLE_UDP=true`:
@@ -104,17 +131,19 @@ Hiển thị:
 - Uptime server
 - Trạng thái (READY/BUSY)
 
-## 9. Chế Độ Metadata-Only
-Trong chế độ này, nội dung file không được ghi xuống thư mục `uploads/`, chỉ lưu metadata vào DB:
-- Giảm IO
-- Phục vụ demo logic truyền & xử lý
+## 9. Lưu File Thực Tế
+Mặc định, server ghi toàn bộ nội dung file xuống thư mục `uploads/` ở thư mục gốc dự án:
+- Đường dẫn: `d:\\LTM\\nhomltmck\\uploads` (Windows) hoặc `./uploads/`
+- Metadata file (tên, kích thước, mime, trạng thái, user, session) vẫn được lưu vào DB nếu bật `ENABLE_DB`.
+
+Lưu ý: Nếu bạn chạy server từ thư mục khác, hãy kiểm tra current working directory để đảm bảo đường dẫn `uploads/` đúng vị trí mong muốn.
 
 ## 10. Quy Trình Upload (TCP)
 1. Client chọn file -> đưa vào hàng đợi
 2. Thread manager lấy file từ queue
 3. Kết nối TCP tới server
 4. Gửi header (user_id, filename, size, checksum nếu có)
-5. Gửi nội dung (hoặc bỏ qua nếu metadata-only)
+5. Gửi nội dung
 6. Server cập nhật `upload_stats` + ghi vào DB nếu bật
 
 ## 11. Bật/Tắt Tính Năng Nhanh
@@ -134,7 +163,7 @@ $env:ENABLE_DB="true"; python -m server.run_combined
 | JSON Decimal error | Kiểu Decimal từ DB | Đã fix trong `multicast_monitor.py` |
 | MySQL access denied | Sai user/password | Kiểm tra cấu hình XAMPP |
 | Dashboard không nhận multicast | TTL hoặc group sai | Dùng group `239.0.0.1`, TTL >=2 |
-| Upload không ghi file | Đang ở chế độ metadata-only | Đổi config nếu cần lưu file |
+| Không thấy file trong uploads | Chạy sai thư mục hoặc quyền ghi | Kiểm tra working dir và quyền ghi vào `uploads/` |
 
 ## 13. Demo Nhanh (Gợi Ý)
 1. Mở 2 terminal: Server + Multicast Dashboard.

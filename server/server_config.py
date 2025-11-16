@@ -25,7 +25,7 @@ MULTICAST_INTERVAL = 3.0  # Seconds between stat broadcasts
 MULTICAST_TTL = 2  # Time-to-live: 1=same subnet, 2=same site, >2=wider network
 
 # Upload handling
-UPLOAD_DIR = 'server/uploads'
+UPLOAD_DIR = 'uploads'
 BUFFER_SIZE = 4096
 
 # Logging

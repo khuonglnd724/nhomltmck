@@ -3,3 +3,4 @@ fastapi==0.115.0
 uvicorn==0.32.0
 python-multipart==0.0.9  # for form uploads
 requests==2.32.3
+httpx==0.27.2
