@@ -14,6 +14,35 @@ Ví dụ chạy cục bộ: `http://127.0.0.1:8000` (tùy cấu hình uvicorn n�
 
 Tất cả endpoint dưới đây đều tiền tố `/api`.
 
+## 🎬 Demo HTTP API
+Link demo trực tiếp: **http://127.0.0.1:8000/docs**
+
+Sau khi khởi động server HTTP, truy cập vào đường link trên để xem Swagger UI - giao diện tương tác với API:
+- Xem tất cả endpoints
+- Test trực tiếp từ browser
+- Xem request/response schema
+- Thử nghiệm upload file
+
+**Cách khởi động server:**
+```bash
+# Từ thư mục gốc project
+cd d:\LTM\nhomltmck
+
+# Chạy server (cần set PYTHONPATH)
+$env:PYTHONPATH="d:\LTM\nhomltmck"; python server/http_app.py
+```
+
+**Alternative - sử dụng uvicorn trực tiếp:**
+```bash
+cd d:\LTM\nhomltmck
+uvicorn server.http_app:app --reload --host 0.0.0.0 --port 8000
+```
+
+Sau khi server chạy, mở browser và truy cập:
+- **API Docs (Swagger)**: http://127.0.0.1:8000/docs
+- **ReDoc**: http://127.0.0.1:8000/redoc
+- **Health Check**: http://127.0.0.1:8000/api/health
+
 ## 🧪 Trạng Thái & Hệ Thống
 ### GET `/api/health`
 Mô tả: Kiểm tra tình trạng API, trạng thái DB, và (nếu có) thông tin TCP server tích hợp.
