@@ -13,6 +13,7 @@ class ProgressBar(tk.Frame):
         self.file_size = file_size
         self.uploaded = 0
         self.speed = 0
+        self.current_status = None  # Lưu trạng thái hiện tại
         
         self.configure(bg="#2d2d44", relief="solid", bd=1)
         self.setup_ui()
@@ -112,6 +113,7 @@ class ProgressBar(tk.Frame):
         Args:
             status (str): Trạng thái (waiting, uploading, completed, error)
         """
+        self.current_status = status  # Lưu trạng thái
         status_colors = {
             'waiting': '#9ca3af',
             'uploading': '#7c3aed',
@@ -217,6 +219,12 @@ class ProgressBarManager:
         """Đặt trạng thái cho một file"""
         if file_id in self.progress_bars:
             self.progress_bars[file_id].set_status(status)
+    
+    def get_status(self, file_id):
+        """Lấy trạng thái của một file"""
+        if file_id in self.progress_bars:
+            return self.progress_bars[file_id].current_status
+        return None
     
     def remove_progress_bar(self, file_id):
         """Xóa progress bar"""

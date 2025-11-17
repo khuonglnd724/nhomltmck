@@ -67,30 +67,9 @@ class MainWindow:
         # Build UI
         self.build_ui()
         self.setup_uploader()
+        # Cập nhật hiển thị nút auth ban đầu (Guest)
+        self.update_auth_buttons()
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
-
-    # ----------------------------
-    # JSON helper: save/load user files
-    # ----------------------------
-    def load_user_files(self):
-        """Load file của user hiện tại từ JSON"""
-        try:
-            with open(UPLOADS_DB, "r") as f:
-                db = json.load(f)
-        except FileNotFoundError:
-            db = {}
-        return db.get(str(self.user_id), [])
-
-    def save_user_files(self):
-        """Lưu file hiện tại của user vào JSON"""
-        try:
-            with open(UPLOADS_DB, "r") as f:
-                db = json.load(f)
-        except FileNotFoundError:
-            db = {}
-        db[str(self.user_id)] = list(self.file_map.values())
-        with open(UPLOADS_DB, "w") as f:
-            json.dump(db, f, indent=4)
 
     # ----------------------------
     # UI build
@@ -323,10 +302,12 @@ class MainWindow:
             if mapped == "completed":
                 self.toggle_buttons(True)
                 self.status_label.config(text="✅ Hoàn thành!")
-                self.save_user_files()  # <-- Lưu file ngay khi upload xong
+                self.update_status()  # Cập nhật trạng thái nút Upload
+                # File đã được lưu vào DB bởi server, không cần lưu JSON
             elif mapped == "error":
                 self.toggle_buttons(True)
                 self.status_label.config(text=f"❌ Lỗi upload: {msg}")
+                self.update_status()  # Cập nhật trạng thái nút Upload
             elif mapped == "uploading":
                 self.status_label.config(text="🚀 Đang tải lên...")
 
@@ -344,6 +325,11 @@ class MainWindow:
             return
         uid = authenticate_user(username, password)
         if uid:
+            # Luôn xóa queue hiện tại khi chuyển user (kể cả từ user sang user khác)
+            self.progress_manager.clear_all()
+            self.file_map.clear()
+            self.file_queue.clear()
+            
             self.user_id = int(uid)
             self.username = username
             self.lbl_user.config(text=f"👤 {self.username}")
@@ -351,10 +337,12 @@ class MainWindow:
                 self.uploader.user_id = self.user_id
             except Exception:
                 pass
-            files = self.load_user_files()
-            for path in files:
-                if os.path.exists(path):
-                    self.add_single_file(path)
+            
+            # Cập nhật hiển thị nút auth
+            self.update_auth_buttons()
+            
+            # Không load file từ JSON nữa - user xem file đã upload qua nút "File đã upload"
+            self.update_status()
             messagebox.showinfo("Đăng nhập", "Đăng nhập thành công!")
         else:
             messagebox.showwarning("Đăng nhập", "Sai thông tin đăng nhập!")
@@ -376,6 +364,11 @@ class MainWindow:
         if uid:
             auth_uid = authenticate_user(username, password)
             if auth_uid:
+                # Luôn xóa queue hiện tại khi chuyển user (kể cả từ user sang user khác)
+                self.progress_manager.clear_all()
+                self.file_map.clear()
+                self.file_queue.clear()
+                
                 self.user_id = int(auth_uid)
                 self.username = username
                 self.lbl_user.config(text=f"👤 {self.username}")
@@ -383,13 +376,17 @@ class MainWindow:
                     self.uploader.user_id = self.user_id
                 except Exception:
                     pass
+                
+                # Cập nhật hiển thị nút auth
+                self.update_auth_buttons()
+                self.update_status()
                 messagebox.showinfo("Đăng ký", "Tạo tài khoản và đăng nhập thành công!")
         else:
             messagebox.showwarning("Đăng ký", "Không thể tạo tài khoản. Tên có thể đã tồn tại.")
 
     def logout_user(self):
         if messagebox.askokcancel("Xác nhận đăng xuất", "Bạn có chắc muốn đăng xuất và xóa danh sách file?"):
-            self.save_user_files()
+            # Không cần save vào JSON nữa, DB là nguồn chân lý duy nhất
             self.progress_manager.clear_all()
             self.file_map.clear()
             self.update_status()
@@ -400,42 +397,110 @@ class MainWindow:
                 self.uploader.user_id = 1
             except Exception:
                 pass
+            
+            # Cập nhật hiển thị nút auth về trạng thái Guest
+            self.update_auth_buttons()
             messagebox.showinfo("Đăng xuất", "Bạn đã đăng xuất.")
 
     # ----------------------------
     # Mới: Hiển thị file đã upload
     # ----------------------------
     def show_uploaded_files(self):
-        files = self.load_user_files()
-        if not files:
-            messagebox.showinfo("File đã upload", "Chưa có file nào được upload!")
+        """Hiển thị danh sách file đã upload từ database"""
+        try:
+            from services.user_service import list_user_files
+            from database.config import CONFIG
+            
+            # Kiểm tra DB có được bật không
+            if not CONFIG.enabled:
+                messagebox.showwarning("Lỗi", "Database chưa được bật. Không thể lấy danh sách file!")
+                return
+            
+            # Lấy danh sách file từ database theo user_id
+            files = list_user_files(self.user_id)
+            
+            if not files:
+                messagebox.showinfo("File đã upload", "Chưa có file nào được upload!")
+                return
+                
+        except Exception as e:
+            messagebox.showerror("Lỗi", f"Không thể lấy danh sách file: {e}")
             return
+        
         popup = tk.Toplevel(self.root)
         popup.title(f"📂 File của {self.username}")
-        popup.geometry("400x300")
+        popup.geometry("500x350")
         popup.configure(bg=self.C['bg2'])
-        tk.Label(popup, text=f"📂 Danh sách file đã upload - User {self.user_id}",
+        tk.Label(popup, text=f"📂 Danh sách file đã upload ({len(files)} file)",
                  font=("Segoe UI", 11, 'bold'), bg=self.C['bg2'], fg=self.C['text']).pack(pady=10)
         listbox = tk.Listbox(popup, bg=self.C['bg'], fg=self.C['text'], selectbackground=self.C['accent'])
         listbox.pack(fill='both', expand=True, padx=10, pady=10)
-        for f in files:
-            listbox.insert('end', f)
+        
+        # Lưu map từ index -> file info để có thể mở file
+        file_map = {}
+        
+        # Lấy đường dẫn thư mục uploads (cùng cấp với thư mục client)
+        uploads_dir = os.path.join(project_dir, "uploads")
+        
+        for idx, file_info in enumerate(files):
+            # file_info chứa: file_id, original_filename, file_size_bytes, upload_date, status
+            filename = file_info.get('original_filename', 'Unknown')
+            file_size = file_info.get('file_size_bytes', 0)
+            status = file_info.get('status', 'unknown')
+            
+            # Hiển thị: tên file + kích thước + trạng thái
+            size_mb = file_size / (1024 * 1024)
+            display_text = f"{filename} ({size_mb:.2f} MB) - {status}"
+            listbox.insert('end', display_text)
+            
+            # Lưu thông tin file để mở sau
+            file_path = os.path.join(uploads_dir, filename)
+            file_map[idx] = {
+                'filename': filename,
+                'path': file_path,
+                'status': status
+            }
 
         # Mở file khi double-click
         def open_file(event):
             selection = listbox.curselection()
             if selection:
-                path = listbox.get(selection[0])
-                if os.path.exists(path):
-                    os.startfile(path)
-                else:
-                    messagebox.showwarning("Lỗi", f"File không tồn tại: {path}")
+                idx = selection[0]
+                file_info = file_map.get(idx)
+                if file_info:
+                    file_path = file_info['path']
+                    filename = file_info['filename']
+                    
+                    if os.path.exists(file_path):
+                        try:
+                            os.startfile(file_path)
+                        except Exception as e:
+                            messagebox.showerror("Lỗi", f"Không thể mở file: {e}")
+                    else:
+                        messagebox.showwarning("Lỗi", f"File không tồn tại trong thư mục uploads: {filename}")
 
         listbox.bind("<Double-1>", open_file)
 
         tk.Button(popup, text="Đóng", command=popup.destroy, bg=self.C['accent'],
                   fg='white', font=("Segoe UI", 10, 'bold')).pack(pady=5)
 
+    # ----------------------------
+    # Auth button visibility
+    # ----------------------------
+    def update_auth_buttons(self):
+        """Cập nhật hiển thị các nút đăng nhập/đăng ký/đăng xuất dựa trên trạng thái user"""
+        is_guest = (self.user_id == 1 and self.username == "Guest")
+        
+        if is_guest:
+            # Guest: hiện đăng nhập và đăng ký, ẩn đăng xuất
+            self.btn_login.pack(side='right', padx=(0, 6))
+            self.btn_register.pack(side='right', padx=(6, 0))
+            self.btn_logout.pack_forget()
+        else:
+            # Đã đăng nhập: chỉ hiện đăng xuất, ẩn đăng nhập và đăng ký
+            self.btn_login.pack_forget()
+            self.btn_register.pack_forget()
+            self.btn_logout.pack(side='right')
 
     # ----------------------------
     # Button control
@@ -451,12 +516,31 @@ class MainWindow:
     # Misc
     # ----------------------------
     def update_status(self):
-        self.status_label.config(text=f"📋 Sẵn sàng | {len(self.file_map)} file")
+        file_count = len(self.file_map)
+        self.status_label.config(text=f"📋 Sẵn sàng | {file_count} file")
+        
+        # Kiểm tra xem có file chưa upload không
+        has_uploadable_files = False
+        if file_count > 0:
+            # Kiểm tra xem có file nào chưa hoàn thành không
+            for fid in self.file_map:
+                status = self.progress_manager.get_status(fid)
+                # Nếu file đang waiting hoặc chưa bắt đầu thì có thể upload
+                if status in (None, 'waiting'):
+                    has_uploadable_files = True
+                    break
+        
+        # Enable/disable nút Upload dựa trên trạng thái
+        if not self.is_uploading:
+            if has_uploadable_files:
+                self.btn_start.config(state='normal')
+            else:
+                self.btn_start.config(state='disabled')
 
     def on_close(self):
         if self.is_uploading and not messagebox.askyesno("Xác nhận", "Đang upload, thoát sẽ hủy!"):
             return
-        self.save_user_files()
+        # Không cần lưu JSON nữa - DB là nguồn chân lý
         self.root.destroy()
 
 
