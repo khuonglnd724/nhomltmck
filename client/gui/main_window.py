@@ -8,6 +8,7 @@ from tkinter import filedialog, messagebox
 import os
 import sys
 import threading
+import json
 
 # Setup path để import module client
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -23,13 +24,15 @@ from client.uploader.upload_client import UploadClient
 from client.async_controller.thread_manager import ThreadManager
 from client.logger.logger import Logger
 
-
 # TkinterDnD2
 try:
     from tkinterdnd2 import DND_FILES, TkinterDnD
     HAS_DND = True
 except ImportError:
     HAS_DND = False
+
+# File lưu file upload theo user
+UPLOADS_DB = os.path.join(project_dir, "uploads_per_user.json")
 
 
 class MainWindow:
@@ -68,6 +71,32 @@ class MainWindow:
         self.setup_uploader()
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
+    # ----------------------------
+    # JSON helper: save/load user files
+    # ----------------------------
+    def load_user_files(self):
+        """Load file của user hiện tại từ JSON"""
+        try:
+            with open(UPLOADS_DB, "r") as f:
+                db = json.load(f)
+        except FileNotFoundError:
+            db = {}
+        return db.get(str(self.user_id), [])
+
+    def save_user_files(self):
+        """Lưu file hiện tại của user vào JSON"""
+        try:
+            with open(UPLOADS_DB, "r") as f:
+                db = json.load(f)
+        except FileNotFoundError:
+            db = {}
+        db[str(self.user_id)] = list(self.file_map.values())
+        with open(UPLOADS_DB, "w") as f:
+            json.dump(db, f, indent=4)
+
+    # ----------------------------
+    # UI build
+    # ----------------------------
     def build_ui(self):
         """Xây dựng giao diện"""
         # Header
@@ -79,7 +108,6 @@ class MainWindow:
         # Login area
         right_box = tk.Frame(top_row, bg=self.C['bg2'])
         right_box.pack(side='right', padx=10)
-        # Đã bỏ nút "Tìm server" theo yêu cầu
         self.lbl_user = tk.Label(right_box, text=f"👤 {self.username}", font=("Segoe UI", 9),
                       bg=self.C['bg2'], fg=self.C['muted'])
         self.lbl_user.pack(side='left', padx=(0,6))
@@ -145,8 +173,9 @@ class MainWindow:
                                      bg=self.C['bg2'], fg=self.C['muted'], anchor='w', padx=15)
         self.status_label.pack(fill='both', expand=True)
 
-
-    # --- Helper methods ---
+    # ----------------------------
+    # Helper methods
+    # ----------------------------
     def make_frame(self, parent, bg, fill='both', h=None, prop=True):
         f = tk.Frame(parent, bg=bg)
         if h:
@@ -168,7 +197,9 @@ class MainWindow:
         b.pack(side='left', padx=5)
         return b
 
-    # --- File handling ---
+    # ----------------------------
+    # File handling
+    # ----------------------------
     def on_drop(self, event):
         self.logger.log(f"📂 Drop event: {event.data}")
         paths = self.root.tk.splitlist(event.data)
@@ -176,8 +207,6 @@ class MainWindow:
             if os.path.isfile(path):
                 self.logger.log(f"✅ Added from drop: {path}")
                 self.add_single_file(path)
-
-
 
     def add_files(self):
         for path in filedialog.askopenfilenames(title="Chọn file"):
@@ -191,20 +220,19 @@ class MainWindow:
             messagebox.showwarning("Lỗi", f"File không hợp lệ!")
             return
         
-        # Add to FileQueue first; it returns a stable file id we can reuse
         fqid = self.file_queue.add_file(path)
         if not fqid:
-            # already queued
             return
 
-        # Register same id with ThreadManager so progress callbacks use the same id
         fid = self.thread_manager.add_file(path, file_id=fqid)
         self.file_map[fid] = path
         self.progress_manager.add_progress_bar(fid, os.path.basename(path), os.path.getsize(path))
         self.update_status()
         self.logger.log(f"Added: {os.path.basename(path)}")
 
-    # --- Upload ---
+    # ----------------------------
+    # Upload
+    # ----------------------------
     def setup_uploader(self):
         self.uploader = UploadClient(host="127.0.0.1", port=9999, user_id=self.user_id)
         self.thread_manager = ThreadManager(self.uploader, max_workers=3,
@@ -214,41 +242,30 @@ class MainWindow:
     def start_upload(self):
         if not self.file_map:
             return messagebox.showwarning("Lỗi", "Chưa có file!")
-
-        # Nếu đang upload thì không làm gì cả (tránh bấm nhiều lần)
         if self.is_uploading:
             return
-
         self.is_uploading = True
-        self.toggle_buttons(False)  # Tắt nút Upload, bật nút Dừng
+        self.toggle_buttons(False)
         self.status_label.config(text="🚀 Đang tải lên...")
         self.logger.log("Upload started")
-
         try:
-            # Bắt đầu upload (gọi thread manager của bạn)
             self.thread_manager.start_workers()
         except AttributeError:
-            # Trường hợp cũ hơn dùng start()
             self.thread_manager.start()
 
     def cancel_upload(self):
-        """Hàm dừng upload"""   
         if not self.is_uploading:
             return
-
         self.is_uploading = False
-        self.toggle_buttons(True)  # Bật lại nút Upload
+        self.toggle_buttons(True)
         self.status_label.config(text="⏸️ Đã dừng upload.")
         self.logger.log("Upload cancelled")
-
         try:
-            # Nếu thread_manager hỗ trợ dừng
             self.thread_manager.stop_workers()
         except AttributeError:
             pass
-    
+
     def finish_upload(self):
-        """Khi upload hoàn tất hoặc bị dừng"""
         self.is_uploading = False
         self.btn_cancel.config(state='disabled')
         self.btn_start.config(state='normal')
@@ -264,18 +281,17 @@ class MainWindow:
             self.update_status()
             self.logger.log("List cleared")
 
-    # --- GUI update callback ---
+    # ----------------------------
+    # GUI update callback
+    # ----------------------------
     def gui_update(self, event_type, payload):
-        # Marshal all GUI updates to the Tk main thread to avoid thread-safety issues
         try:
             self.root.after(0, lambda: self._process_gui_update(event_type, payload))
         except Exception:
-            # If root is gone or scheduling fails, fallback to direct call
             self._process_gui_update(event_type, payload)
 
     def _process_gui_update(self, event_type, payload):
         fid = payload.get("id")
-        # Bổ sung log chi tiết cho mọi trạng thái
         import logging
         logger = logging.getLogger("main_window_upload")
         if event_type == "progress":
@@ -325,9 +341,10 @@ class MainWindow:
             self.status_label.config(text="✅ Hoàn thành!")
             self.logger.log("Completed")
 
-    # --- Auth ---
+    # ----------------------------
+    # Auth
+    # ----------------------------
     def login_dialog(self):
-        """Đăng nhập qua MySQL (tùy chọn). Yêu cầu ENABLE_DB=true và cấu hình DB hợp lệ."""
         try:
             import tkinter.simpledialog as sd
             from services.user_service import authenticate_user
@@ -352,17 +369,20 @@ class MainWindow:
             self.user_id = int(uid)
             self.username = username
             self.lbl_user.config(text=f"👤 {self.username}")
-            # propagate into uploader
             try:
                 self.uploader.user_id = self.user_id
             except Exception:
                 pass
+            # Load lại file trước đó của user
+            files = self.load_user_files()
+            for path in files:
+                if os.path.exists(path):
+                    self.add_single_file(path)
             messagebox.showinfo("Đăng nhập", "Đăng nhập thành công!")
         else:
             messagebox.showwarning("Đăng nhập", "Sai thông tin đăng nhập!")
 
     def register_dialog(self):
-        """Đăng ký tài khoản mới trong MySQL (tùy chọn)."""
         try:
             import tkinter.simpledialog as sd
             from services.user_service import register_user, authenticate_user
@@ -385,7 +405,6 @@ class MainWindow:
             uid = register_user(username, password)
             if uid:
                 messagebox.showinfo("Đăng ký", "Tạo tài khoản thành công! Sẽ đăng nhập ngay.")
-                # Auto-login
                 auth_uid = authenticate_user(username, password)
                 if auth_uid:
                     self.user_id = int(auth_uid)
@@ -401,18 +420,28 @@ class MainWindow:
             messagebox.showerror("Đăng ký", f"Lỗi DB: {e}")
 
     def logout_user(self):
-        """Đăng xuất người dùng hiện tại, quay về chế độ Guest."""
-        self.user_id = 1  # Guest user_id in database
+        """Đăng xuất người dùng hiện tại"""
+        # Lưu file trước khi xóa UI
+        self.save_user_files()
+
+        # Xóa danh sách file UI
+        self.progress_manager.clear_all()
+        self.file_map.clear()
+        self.update_status()
+
+        # Quay về Guest
+        self.user_id = 1
         self.username = "Guest"
         self.lbl_user.config(text=f"👤 {self.username}")
         try:
-            self.uploader.user_id = 1  # Guest user_id in database
+            self.uploader.user_id = 1
         except Exception:
             pass
         messagebox.showinfo("Đăng xuất", "Bạn đã đăng xuất.")
 
-    # Đã bỏ hàm discover_servers theo yêu cầu
-
+    # ----------------------------
+    # Button control
+    # ----------------------------
     def toggle_buttons(self, enable):
         self.is_uploading = not enable
         self.btn_start.config(state='normal' if enable else 'disabled')
@@ -421,23 +450,27 @@ class MainWindow:
         self.btn_clear.config(state='normal' if enable else 'disabled')
 
     def update_status(self):
-        self.status_label.config(text=f"📋 Sẵn sàng | {len(self.file_map)} file")
+        total = len(self.file_map)
+        self.status_label.config(text=f"📋 Sẵn sàng | {total} file")
 
+    # ----------------------------
+    # Exit
+    # ----------------------------
     def on_close(self):
-        if self.is_uploading and not messagebox.askyesno("Cảnh báo", "Đang upload. Thoát?"):
-            return
-        if messagebox.askyesno("Thoát", "Thoát chương trình?"):
-            self.thread_manager.stop(wait=False)
-            self.logger.log("App closed")
-            self.root.destroy()
-
-
+        if self.is_uploading:
+            if not messagebox.askyesno("Thoát", "Đang upload! Thoát chắc chắn?"):
+                return
+        self.save_user_files()
+        self.root.destroy()
 def main():
-    from tkinterdnd2 import TkinterDnD  # đảm bảo có dòng này
-    root = TkinterDnD.Tk()              # KHÔNG dùng tk.Tk()
-    MainWindow(root)
+    try:
+        from tkinterdnd2 import TkinterDnD  # đảm bảo Drag & Drop hoạt động
+        root = TkinterDnD.Tk()              # KHÔNG dùng tk.Tk()
+    except ImportError:
+        import tkinter as tk
+        root = tk.Tk()
+    app = MainWindow(root)
     root.mainloop()
-
 
 
 if __name__ == "__main__":
