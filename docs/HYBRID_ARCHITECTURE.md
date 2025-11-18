@@ -6,12 +6,12 @@
 
 Mỗi giao thức có thế mạnh riêng:
 
-| Protocol | Điểm mạnh | Điểm yếu | Tình huống dùng |
-|----------|-----------|----------|-----------------|
-| **TCP** | Tin cậy tuyệt đối, có thứ tự | Handshake ban đầu | Upload file lớn |
-| **UDP** | Độ trễ thấp, không handshake | Không đảm bảo tin cậy | Discovery, ping, pre-check |
-| **HTTP** | Chuẩn, dễ tích hợp, qua firewall | Overhead, stateless | API quản lý, web/mobile |
-| **Multicast** | Phát 1 lần nhiều nơi nhận | Không xác nhận từng client | Giám sát realtime |
+| Protocol      | Điểm mạnh                        | Điểm yếu                   | Tình huống dùng            |
+| ------------- | -------------------------------- | -------------------------- | -------------------------- |
+| **TCP**       | Tin cậy tuyệt đối, có thứ tự     | Handshake ban đầu          | Upload file lớn            |
+| **UDP**       | Độ trễ thấp, không handshake     | Không đảm bảo tin cậy      | Discovery, ping, pre-check |
+| **HTTP**      | Chuẩn, dễ tích hợp, qua firewall | Overhead, stateless        | API quản lý, web/mobile    |
+| **Multicast** | Phát 1 lần nhiều nơi nhận        | Không xác nhận từng client | Giám sát realtime          |
 
 ---
 
@@ -22,6 +22,7 @@ Mỗi giao thức có thế mạnh riêng:
 **Vấn đề:** Client phải nhập IP/port thủ công (dễ sai, tốn thời gian)
 
 **Giải pháp (UDP broadcast):**
+
 ```
 [Server] ------broadcast------> [LAN] (mỗi 5s)
    "FileServer @ 192.168.1.100:9999"
@@ -33,6 +34,7 @@ Mỗi giao thức có thế mạnh riêng:
 ```
 
 **So sánh:**
+
 - Cấu hình tay: ~30s
 - UDP discovery tự động: ~0.5s
 
@@ -43,6 +45,7 @@ Mỗi giao thức có thế mạnh riêng:
 **Vấn đề:** TCP handshake tốn thời gian; nếu file bị từ chối thì phí kết nối
 
 **Giải pháp (UDP PRE_CHECK):**
+
 ```python
 # Trước (chỉ TCP):
 1. TCP connect         50ms  ┐
@@ -66,6 +69,7 @@ Nếu ACCEPT:
 ```
 
 **Code flow:**
+
 ```python
 # client/uploader/upload_client.py
 def upload_file(self, filepath, ...):
@@ -73,7 +77,7 @@ def upload_file(self, filepath, ...):
     result = udp_precheck(host, filename, filesize, user_id)
     if result["status"] == "REJECT":
         return {"error": result["reason"]}  # Fast fail
-    
+
     # TCP upload (chỉ khi đã pass pre-check)
     with TCPConnection(host, port) as conn:
         conn.send_file(filepath)
@@ -86,6 +90,7 @@ def upload_file(self, filepath, ...):
 **Vấn đề:** Dùng TCP để kiểm tra độ trễ = tốn thêm handshake
 
 **Giải pháp (UDP PING/PONG):**
+
 ```
 TCP ping:
   SYN → SYN-ACK → ACK → Close
@@ -97,6 +102,7 @@ UDP ping:
 ```
 
 **Usage:**
+
 ```python
 from client.udp_discovery import ping_server
 latency = ping_server("192.168.1.100")
@@ -110,18 +116,20 @@ print(f"Server latency: {latency}ms")
 **Vấn đề:** Desktop client thuần TCP khó tích hợp web/mobile
 
 **Giải pháp (HTTP chuẩn REST):**
+
 ```javascript
 // Web client
-fetch('http://server.com/api/upload', {
-  method: 'POST',
-  body: formData
-})
+fetch("http://server.com/api/upload", {
+  method: "POST",
+  body: formData,
+});
 
 // Mobile (React Native, Flutter)
-axios.post('/api/upload', data)
+axios.post("/api/upload", data);
 ```
 
 **Lợi ích:**
+
 - Standard protocol
 - Browser compatible
 - Firewall-friendly (port 80/443)
@@ -133,31 +141,33 @@ axios.post('/api/upload', data)
 
 ### Trường hợp: Upload file 10MB
 
-| Kịch bản | Chuẩn bị | Thời gian upload | Tốc độ |
-|----------|----------|------------------|--------|
-| Manual + TCP | ~30s | ~2s | 5 MB/s |
-| UDP discovery + TCP | ~0.5s | ~2s | 5 MB/s |
-| Tiết kiệm | ~29.5s | - | - |
+| Kịch bản            | Chuẩn bị | Thời gian upload | Tốc độ |
+| ------------------- | -------- | ---------------- | ------ |
+| Manual + TCP        | ~30s     | ~2s              | 5 MB/s |
+| UDP discovery + TCP | ~0.5s    | ~2s              | 5 MB/s |
+| Tiết kiệm           | ~29.5s   | -                | -      |
 
 ### Trường hợp: File bị từ chối (quá lớn)
 
-| Kịch bản | Thời gian lãng phí |
-|----------|-------------------|
-| Chỉ TCP | ~90ms |
-| Có UDP pre-check | ~20ms |
-| Tiết kiệm | ~70ms / file |
+| Kịch bản         | Thời gian lãng phí |
+| ---------------- | ------------------ |
+| Chỉ TCP          | ~90ms              |
+| Có UDP pre-check | ~20ms              |
+| Tiết kiệm        | ~70ms / file       |
 
 ---
 
 ## Nên Dùng Giao Thức Nào Khi Nào?
 
 ### TCP
+
 - Upload file lớn (>1MB)
 - Cần độ tin cậy tuyệt đối
 - Qua Internet (UDP dễ bị filter)
 - Có yêu cầu tracking tiến độ
 
 ### UDP
+
 - Tìm server tự động (broadcast)
 - Ping nhanh độ trễ thấp
 - Pre-check metadata trước TCP
@@ -165,6 +175,7 @@ axios.post('/api/upload', data)
 - Không dùng để truyền file lớn
 
 ### HTTP
+
 - Tích hợp web/mobile
 - REST chuẩn, dễ mở rộng
 - Qua firewall dễ dàng
@@ -172,6 +183,7 @@ axios.post('/api/upload', data)
 - Không tối ưu truyền file lớn tùy chỉnh
 
 ### Multicast
+
 - Giám sát trạng thái realtime nhiều dashboard
 - Giảm tải so với mỗi dashboard phải tự hỏi (poll)
 
@@ -216,9 +228,23 @@ Người dùng mở ứng dụng
 ## Kết Luận
 
 **Hybrid = Phối hợp điểm mạnh:**
+
 - UDP: Tìm & xác thực nhanh
 - TCP: Truyền tin cậy
 - HTTP: Quản lý & tích hợp
 - Multicast: Giám sát realtime hiệu quả
 
 Không chỉ “so sánh” mà là “kết hợp để tối ưu toàn diện”.
+
+---
+
+## Cấu Hình Chung (Đồng Bộ)
+
+Các thông số upload/streaming dùng chung cho Client và Server được đặt trong `config.py` ở thư mục gốc:
+
+- `CONNECTION_TIMEOUT` = 60s
+- `MAX_FILE_SIZE_MB` = 100MB
+- `CHUNK_SIZE` = 8192 bytes (client gửi)
+- `BUFFER_SIZE` = 4096 bytes (server nhận)
+
+`server/server_config.py` import các giá trị này cho TCP/HTTP/UDP server. Hãy cập nhật ở `config.py` để tránh sai lệch giữa các thành phần.

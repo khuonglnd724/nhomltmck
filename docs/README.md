@@ -1,6 +1,7 @@
 # Dự Án Upload File - Kiến Trúc Hybrid
 
 ## Tổng Quan
+
 Dự án minh họa cách kết hợp ba giao thức **TCP + UDP + HTTP/HTTPS** để tối ưu tốc độ, khả năng khám phá dịch vụ, và mở rộng về quản lý.
 
 ```
@@ -17,23 +18,27 @@ Dự án minh họa cách kết hợp ba giao thức **TCP + UDP + HTTP/HTTPS** 
 ### Vai Trò Từng Giao Thức
 
 **TCP (9999)**
+
 - Truyền file kích thước lớn
 - Đảm bảo thứ tự & toàn vẹn
 - Length prefix 8 byte + thread mỗi connection
 - Ghi file xuống `uploads/` + cập nhật DB (nếu bật)
 
 **UDP (9998 / broadcast 8888)**
+
 - Khám phá server (broadcast)
 - Ping đo độ trễ (unicast)
 - Pre-check nhanh metadata (unicast)
 - Không handshake → tiết kiệm thời gian kết nối ban đầu
 
 **HTTP/HTTPS (8000)**
+
 - API chuẩn: đăng ký, đăng nhập, upload (phiên bản HTTP), thống kê, danh sách file
 - Dễ tích hợp trình duyệt / mobile
 - Có thể bật HTTPS (ENV: ENABLE_HTTPS)
 
 **Multicast (239.0.0.1:5555)**
+
 - Phát số liệu trạng thái định kỳ (active connections, tổng file, bytes, uptime)
 - Nhiều dashboard nhận cùng lúc, không gây thêm tải đơn lẻ
 
@@ -50,6 +55,7 @@ python -m server.run_combined
 ```
 
 Output:
+
 ```
 ======================================================================
 Combined TCP + UDP + HTTP/HTTPS Server
@@ -67,18 +73,23 @@ INFO:     Uvicorn running on http://127.0.0.1:8000
 ### 1. Service Discovery (Tìm server tự động qua broadcast)
 
 **Command-line (Passive):**
+
 ```powershell
 python -m client.udp_discovery
 ```
+
 **Active discovery:**
+
 ```powershell
 python -c "from client.udp_discovery import discover_servers_active; print(discover_servers_active())"
 ```
+
 **Lợi ích:** Không cần nhập IP, hỗ trợ nhiều server, thời gian tìm < 1s.
 
 ### 2. UDP Pre-check (Xác thực sớm)
 
 **Luồng Tối Ưu:**
+
 ```
 1. Client --[UDP pre-check]--> Server (10ms)
    { "filename": "test.txt", "filesize": 1024000, "user_id": 1 }
@@ -97,6 +108,7 @@ Tiết kiệm: ~50-100ms (không cần TCP handshake để check)
 ```
 
 **So sánh:**
+
 ```
 Không có UDP pre-check:
   TCP connect → Send metadata → Server reject → Close
@@ -127,15 +139,17 @@ pip install -r requirements.txt
 
 - Run HTTP server:
 
-```powershell
+````powershell
 ```powershell
 # Chỉ HTTP (nếu muốn tách riêng)
 python -m server.http_server
 
 # Server kết hợp (TCP + UDP + Multicast + HTTP)
 $env:ENABLE_DB="true"; python -m server.run_combined
-```
+````
+
 Endpoints chính:
+
 - `GET /api/health`
 - `POST /api/register` {username, password}
 - `POST /api/login` {username, password}
@@ -148,11 +162,13 @@ Ghi chú: Khi DB tắt (`ENABLE_DB=false`), upload HTTP vẫn hoạt động nh�
 ## Demo Client HTTP (tuỳ chọn nếu có)
 
 - Install deps:
+
 ```powershell
 pip install -r requirements.txt
 ```
 
 - Quick usage:
+
 ```powershell
 # Health
 python -m client.http_client health
@@ -162,3 +178,16 @@ python -m client.http_client upload --file README.md --user-id 1
 python -m client.http_client files --user-id 1
 python -m client.http_client stats
 ```
+
+---
+
+## Cấu Hình Chung (Đồng Bộ Client/Server)
+
+Các tham số quan trọng được định nghĩa một lần trong `config.py` (thư mục gốc dự án) và được cả client lẫn server import để tránh lệch cấu hình:
+
+- `CONNECTION_TIMEOUT` = 60 (giây)
+- `MAX_FILE_SIZE_MB` = 100 (MB)
+- `CHUNK_SIZE` = 8192 (bytes, kích thước mỗi chunk client gửi)
+- `BUFFER_SIZE` = 4096 (bytes, kích thước mỗi lần server nhận)
+
+Lưu ý: `server/server_config.py` sẽ import các giá trị này. Vui lòng không chỉnh các giá trị trên ở file khác để đảm bảo đồng bộ.

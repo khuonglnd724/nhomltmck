@@ -2,28 +2,33 @@
 
 Phiên bản: 1.0.0  
 Server: FastAPI  
-Phạm vi: Chỉ cung cấp chức năng upload và thống kê (không có tải xuống).  
+Phạm vi: Chỉ cung cấp chức năng upload và thống kê (không có tải xuống).
 
 ## 🔑 Tổng Quan
+
 - Cơ chế xác thực đơn giản (register/login) qua DB; khi DB tắt dùng Guest user (user_id=1).
 - Upload qua HTTP KHÔNG ghi file ra đĩa (metadata-only). Việc ghi file thực tế hiện được thực hiện ở giao thức TCP.
 - Khi `ENABLE_DB=false` các endpoint phụ thuộc DB trả mã lỗi 503 hoặc trả về dữ liệu mặc định.
 
 ## 🌐 Base URL
+
 Ví dụ chạy cục bộ: `http://127.0.0.1:8000` (tùy cấu hình uvicorn nếu có). Trong project này dùng module trực tiếp nên mặc định host/port của FastAPI runner.
 
 Tất cả endpoint dưới đây đều tiền tố `/api`.
 
 ## 🎬 Demo HTTP API
+
 Link demo trực tiếp: **http://127.0.0.1:8000/docs**
 
 Sau khi khởi động server HTTP, truy cập vào đường link trên để xem Swagger UI - giao diện tương tác với API:
+
 - Xem tất cả endpoints
 - Test trực tiếp từ browser
 - Xem request/response schema
 - Thử nghiệm upload file
 
 **Cách khởi động server:**
+
 ```bash
 # Từ thư mục gốc project
 cd d:\LTM\nhomltmck
@@ -33,21 +38,26 @@ $env:PYTHONPATH="d:\LTM\nhomltmck"; python server/http_app.py
 ```
 
 **Alternative - sử dụng uvicorn trực tiếp:**
+
 ```bash
 cd d:\LTM\nhomltmck
 uvicorn server.http_app:app --reload --host 0.0.0.0 --port 8000
 ```
 
 Sau khi server chạy, mở browser và truy cập:
+
 - **API Docs (Swagger)**: http://127.0.0.1:8000/docs
 - **ReDoc**: http://127.0.0.1:8000/redoc
 - **Health Check**: http://127.0.0.1:8000/api/health
 
 ## 🧪 Trạng Thái & Hệ Thống
+
 ### GET `/api/health`
+
 Mô tả: Kiểm tra tình trạng API, trạng thái DB, và (nếu có) thông tin TCP server tích hợp.
 
 Phản hồi 200:
+
 ```json
 {
   "status": "ok",
@@ -65,46 +75,65 @@ Phản hồi 200:
 Trường `tcp` có thể là `null` hoặc `{ "error": "unavailable" }` nếu TCP server chưa sẵn sàng.
 
 ## 👤 Người Dùng
+
 ### POST `/api/register`
+
 Mô tả: Tạo tài khoản mới (chỉ hoạt động khi DB bật).  
 Body JSON:
+
 ```json
 { "username": "alice", "password": "secret123" }
 ```
+
 Phản hồi 200:
+
 ```json
 { "user_id": 5, "username": "alice" }
 ```
+
 Lỗi:
+
 - 400: Trùng tên hoặc sai định dạng.
 - 503: DB tắt.
 
 ### POST `/api/login`
+
 Mô tả: Đăng nhập lấy `user_id`. Khi DB tắt trả về Guest (`user_id=1`).  
 Body JSON:
+
 ```json
 { "username": "alice", "password": "secret123" }
 ```
+
 Phản hồi 200 (DB bật):
+
 ```json
 { "user_id": 5, "username": "alice" }
 ```
+
 Phản hồi 200 (DB tắt):
+
 ```json
 { "user_id": 1, "username": "Guest" }
 ```
+
 Lỗi:
+
 - 401: Sai thông tin đăng nhập.
 - 500: Lỗi hệ thống.
 
 ## 📤 Upload
+
 ### POST `/api/upload`
+
 Mô tả: Upload 1 file dạng multipart/form-data. Chỉ ghi nhận kích thước, không lưu file vào đĩa ở giao thức HTTP.  
 Form fields:
+
 - `user_id`: số (mặc định 0 nếu không gửi; nên gửi 1 khi dùng Guest).
 - `file`: tệp tin cần upload.
 
 Ví dụ curl:
+
 ```bash
 curl -X POST http://127.0.0.1:8000/api/upload \
   -F "user_id=1" \
@@ -112,6 +141,7 @@ curl -X POST http://127.0.0.1:8000/api/upload \
 ```
 
 Phản hồi (DB tắt):
+
 ```json
 {
   "status": "success",
@@ -124,6 +154,7 @@ Phản hồi (DB tắt):
 ```
 
 Phản hồi (DB bật):
+
 ```json
 {
   "status": "success",
@@ -136,60 +167,81 @@ Phản hồi (DB bật):
   "stored": false
 }
 ```
+
 Lỗi:
+
 - 500: Lỗi ghi nhận metadata hoặc DB.
 
 ## 📂 Danh Sách File
+
 ### GET `/api/files`
+
 Tham số query: `user_id`  
 Mô tả: Trả danh sách file thuộc user (chỉ khi DB bật).  
 Ví dụ: `GET /api/files?user_id=5`
 
 Phản hồi 200:
+
 ```json
-{ "user_id": 5, "files": [ {"file_id": 42, "filename": "sample.txt", "size": 10240} ] }
+{
+  "user_id": 5,
+  "files": [{ "file_id": 42, "filename": "sample.txt", "size": 10240 }]
+}
 ```
+
 Lỗi:
+
 - 503: DB tắt.
 - 500: Lỗi hệ thống.
 
 ## 📈 Thống Kê
+
 ### GET `/api/stats`
+
 Mô tả: Trả về tổng số file và tổng số bytes (aggregate).  
 Phản hồi (DB bật):
+
 ```json
 { "total_files": 150, "total_bytes": 9126805504 }
 ```
+
 Phản hồi (DB tắt):
+
 ```json
 { "total_files": 0, "total_bytes": 0 }
 ```
+
 Lỗi:
+
 - 500: Lỗi hệ thống.
 
 ## 🛡️ Mã Trạng Thái Tổng Hợp
-| Mã | Ý nghĩa |
-|----|---------|
-| 200 | Thành công |
+
+| Mã  | Ý nghĩa                                    |
+| --- | ------------------------------------------ |
+| 200 | Thành công                                 |
 | 400 | Dữ liệu không hợp lệ (ví dụ đăng ký trùng) |
-| 401 | Sai thông tin đăng nhập |
-| 500 | Lỗi hệ thống nội bộ |
-| 503 | Dịch vụ tạm thời không khả dụng (DB tắt) |
+| 401 | Sai thông tin đăng nhập                    |
+| 500 | Lỗi hệ thống nội bộ                        |
+| 503 | Dịch vụ tạm thời không khả dụng (DB tắt)   |
 
 ## 🔐 Ghi Chú Bảo Mật
+
 - Hiện tại mật khẩu được băm (SHA-256) ở tầng dịch vụ, chưa có JWT.
 - Nên thêm HTTPS reverse proxy nếu triển khai thực tế.
 - User Guest dùng id=1 khi DB tắt (không cần đăng ký/login).
 
 ## 🔄 Khác Biệt So Với TCP
-| Tiêu chí | HTTP Upload | TCP Upload |
-|----------|-------------|------------|
-| Lưu file vật lý | Không | Có (ghi vào thư mục uploads/) |
-| Dùng session DB | Có (khi DB bật) | Có (khi DB bật) |
-| Đo tốc độ | Có (dựa vào thời gian đọc stream) | Có (dựa vào vòng lặp nhận) |
-| Giao thức | Multipart HTTP | Socket thuần length-prefix |
+
+| Tiêu chí        | HTTP Upload                       | TCP Upload                    |
+| --------------- | --------------------------------- | ----------------------------- |
+| Lưu file vật lý | Không                             | Có (ghi vào thư mục uploads/) |
+| Dùng session DB | Có (khi DB bật)                   | Có (khi DB bật)               |
+| Đo tốc độ       | Có (dựa vào thời gian đọc stream) | Có (dựa vào vòng lặp nhận)    |
+| Giao thức       | Multipart HTTP                    | Socket thuần length-prefix    |
 
 ## ✅ Checklist Kiểm Tra Nhanh
+
 - [ ] `GET /api/health` hoạt động
 - [ ] Upload nhỏ thành công (DB tắt) trả `stored=false`
 - [ ] Upload khi DB bật trả `file_id`, `session_id`
@@ -198,12 +250,23 @@ Lỗi:
 - [ ] Guest login (DB tắt) trả `user_id=1`
 
 ## 📦 Biến Môi Trường Liên Quan
-| Tên | Vai trò | Giá trị ví dụ |
-|-----|---------|---------------|
-| ENABLE_DB | Bật/tắt thao tác DB | `true` / `false` |
-| TCP_PORT | Cổng TCP server (health hiển thị) | `9999` |
+
+| Tên       | Vai trò                           | Giá trị ví dụ    |
+| --------- | --------------------------------- | ---------------- |
+| ENABLE_DB | Bật/tắt thao tác DB               | `true` / `false` |
+| TCP_PORT  | Cổng TCP server (health hiển thị) | `9999`           |
+
+## ⚙️ Cấu Hình Chung (Đồng Bộ)
+
+- Giới hạn kích thước file và timeout kết nối được quản lý tập trung trong file `config.py` ở thư mục gốc dự án:
+  - `CONNECTION_TIMEOUT` = 60s
+  - `MAX_FILE_SIZE_MB` = 100MB
+  - `CHUNK_SIZE` = 8192 bytes (client gửi)
+  - `BUFFER_SIZE` = 4096 bytes (server nhận)
+- `server/server_config.py` import các giá trị này để dùng cho TCP server; client cũng import trực tiếp từ `config.py` → đảm bảo đồng bộ.
 
 ## 📝 Lưu Ý Cuối
+
 - API này không hỗ trợ tải xuống file.
 - Mọi số liệu tốc độ (`mbps`) mang tính tương đối để demo.
 - Khi cần ghi file qua HTTP có thể mở rộng bằng cách lưu chunk vào đĩa (chưa triển khai theo phạm vi đề tài).

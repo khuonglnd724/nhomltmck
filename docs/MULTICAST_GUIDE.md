@@ -5,6 +5,7 @@
 **Multicast Monitoring** cho phép server tự động phát (broadcast) thông tin trạng thái đến tất cả các dashboard/monitor đang lắng nghe trong mạng LAN, mà không cần dashboard phải liên tục hỏi (poll) server.
 
 ### Lợi Ích
+
 - ✅ **Real-time**: Dashboard nhận dữ liệu ngay lập tức khi có thay đổi
 - ✅ **Hiệu quả**: Không tốn băng thông cho request/response
 - ✅ **Scalable**: Thêm dashboard mới không tăng tải server
@@ -24,6 +25,8 @@ MULTICAST_PORT = 5555                # Cổng multicast
 MULTICAST_INTERVAL = 3.0             # Giây giữa mỗi lần phát
 MULTICAST_TTL = 2                    # Phạm vi: 1=subnet, 2=site, >2=rộng hơn
 ```
+
+Lưu ý: Các tham số giới hạn upload/timeout dùng chung (không liên quan trực tiếp đến multicast) được quản lý tập trung trong `config.py` ở thư mục gốc dự án: `CONNECTION_TIMEOUT`, `MAX_FILE_SIZE_MB`, `CHUNK_SIZE`, `BUFFER_SIZE`. File `server/server_config.py` sẽ import các giá trị này.
 
 ### Override bằng biến môi trường (PowerShell):
 
@@ -49,6 +52,7 @@ cd d:\LTM\nhomltmck
 ```
 
 Script sẽ:
+
 - Backup các file cũ
 - Cập nhật `server_config.py`, `run_combined.py`, `shared_state.py`
 - Kiểm tra `multicast_monitor.py` đã có chưa
@@ -183,6 +187,7 @@ MULTICAST_INTERVAL = 10.0  # Phát mỗi 10 giây thay vì 3 giây
 ### Test 1: Một Server, Một Dashboard
 
 1. Terminal 1:
+
    ```powershell
    cd d:\LTM\nhomltmck
    $env:ENABLE_DB = "true"
@@ -190,12 +195,14 @@ MULTICAST_INTERVAL = 10.0  # Phát mỗi 10 giây thay vì 3 giây
    ```
 
 2. Terminal 2:
+
    ```powershell
    cd d:\LTM\nhomltmck
    python -m server.multicast_dashboard
    ```
 
 3. Terminal 3 (client):
+
    ```powershell
    cd d:\LTM\nhomltmck
    python -m client.gui.main_window
@@ -225,17 +232,20 @@ Tất cả dashboard sẽ nhận cùng dữ liệu từ server.
 Nếu có nhiều máy trong LAN:
 
 **Máy A:**
+
 ```powershell
 python -m server.run_combined
 ```
 
 **Máy B:**
+
 ```powershell
 $env:TCP_PORT = "10000"
 python -m server.run_combined
 ```
 
 **Dashboard (Máy C hoặc bất kỳ):**
+
 ```powershell
 python -m server.multicast_dashboard
 ```
@@ -253,13 +263,13 @@ Dashboard sẽ hiển thị cả 2 server.
 
 **So sánh:**
 
-| Tính năng | Broadcast (UDP Discovery) | Multicast (Monitoring) |
-|-----------|---------------------------|------------------------|
-| Mục đích | Tìm server trong LAN | Giám sát trạng thái real-time |
-| Hướng | Client → All servers | Server → All dashboards |
-| Tần suất | Khi cần (on-demand) | Liên tục (mỗi 3s) |
-| Dữ liệu | Server IP/port | Stats đầy đủ |
-| Ứng dụng | Auto-discovery | Admin dashboard, monitoring |
+| Tính năng | Broadcast (UDP Discovery) | Multicast (Monitoring)        |
+| --------- | ------------------------- | ----------------------------- |
+| Mục đích  | Tìm server trong LAN      | Giám sát trạng thái real-time |
+| Hướng     | Client → All servers      | Server → All dashboards       |
+| Tần suất  | Khi cần (on-demand)       | Liên tục (mỗi 3s)             |
+| Dữ liệu   | Server IP/port            | Stats đầy đủ                  |
+| Ứng dụng  | Auto-discovery            | Admin dashboard, monitoring   |
 
 ---
 
@@ -309,5 +319,3 @@ Dashboard sẽ hiển thị cả 2 server.
 - [ ] Show nhiều dashboard nhận cùng dữ liệu
 
 ---
-
-
