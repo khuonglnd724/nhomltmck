@@ -16,6 +16,12 @@ project_dir = os.path.dirname(os.path.dirname(current_dir))
 if project_dir not in sys.path:
     sys.path.insert(0, project_dir)
 
+# Import shared config
+try:
+    from config import MAX_FILE_SIZE_MB
+except ImportError:
+    MAX_FILE_SIZE_MB = 100  # Fallback
+
 # Import các module thật
 from client.gui.progress_bar import ProgressBarManager
 from client.file_manager.file_handler import FileHandlerGUI
@@ -204,6 +210,18 @@ class MainWindow:
             self.logger.log(f"❌ File không tồn tại: {path}")
             return
 
+        # Kiểm tra kích thước file
+        file_size_bytes = os.path.getsize(path)
+        file_size_mb = file_size_bytes / (1024 * 1024)
+        if file_size_mb > MAX_FILE_SIZE_MB:
+            messagebox.showwarning(
+                "Cảnh báo", 
+                f"File '{os.path.basename(path)}' vượt quá giới hạn {MAX_FILE_SIZE_MB} MB!\n"
+                f"Kích thước: {file_size_mb:.2f} MB"
+            )
+            self.logger.log(f"❌ File quá lớn: {os.path.basename(path)} ({file_size_mb:.2f} MB)")
+            return
+
         # Thêm vào queue
         fqid = self.file_queue.add_file(path)
         if not fqid:
@@ -217,7 +235,7 @@ class MainWindow:
 
         # Thêm vào file_map và progress
         self.file_map[fid] = path
-        self.progress_manager.add_progress_bar(fid, os.path.basename(path), os.path.getsize(path))
+        self.progress_manager.add_progress_bar(fid, os.path.basename(path), file_size_bytes)
         self.update_status()
         self.logger.log(f"✅ Added: {os.path.basename(path)}")
 
