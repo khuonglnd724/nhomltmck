@@ -1,14 +1,24 @@
 import socket
 import json
 import time
+import sys
+import os
+
+# Import shared config
+try:
+    from config import CONNECTION_TIMEOUT, CHUNK_SIZE
+except ImportError:
+    # Fallback nếu không tìm thấy config chung
+    CONNECTION_TIMEOUT = 60
+    CHUNK_SIZE = 8192
 
 class ServerConnection:
-    def __init__(self, host='localhost', port=9999, timeout=30):
+    def __init__(self, host='localhost', port=9999, timeout=CONNECTION_TIMEOUT):
         self.host = host
         self.port = port
         self.timeout = timeout
         self.socket = None
-        self.max_buffer = 8192
+        self.max_buffer = CHUNK_SIZE
 
     def connect(self):
         """Establish connection to server"""
