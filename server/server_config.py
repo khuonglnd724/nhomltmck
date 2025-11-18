@@ -16,7 +16,7 @@ except ImportError:
 # Core TCP server settings
 HOST = '127.0.0.1'
 PORT = 9999
-MAX_CONNECTIONS = 5
+MAX_CONNECTIONS = 20
 
 # HTTP API (FastAPI / uvicorn)
 HTTP_HOST = '127.0.0.1'
