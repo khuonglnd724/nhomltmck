@@ -1,37 +1,66 @@
-# client/file_manager/file_handler.py
-# Member 2 - File Handler (chuẩn theo MainWindow)
-
+# file_handler.py - Member 2
 import os
-from tkinter import messagebox
+import tkinter as tk
+from tkinter import ttk, filedialog, messagebox
+from file_queue import FileQueue
 
 class FileHandlerGUI:
-    """Xử lý và kiểm tra file trước khi thêm vào danh sách upload"""
-
-    def __init__(self, master=None):
-        # Không tạo GUI riêng — chỉ phục vụ validate logic
+    """Giao diện xử lý kéo thả & chọn file"""
+    def __init__(self, master):
         self.master = master
-        self.max_size_mb = 100  # Giới hạn kích thước 100MB mỗi file
+        self.master.title("Multi File Upload - File Manager (Member 2)")
+        self.master.geometry("600x400")
 
-    def validate_file(self, file_path: str) -> bool:
-        """Kiểm tra tính hợp lệ của file trước khi thêm"""
-        if not os.path.exists(file_path):
-            messagebox.showerror("Lỗi", f"File không tồn tại:\n{file_path}")
-            return False
+        self.file_queue = FileQueue()
 
+        # Label hướng dẫn kéo thả
+        self.label = tk.Label(master, text="Kéo thả file vào đây hoặc nhấn 'Chọn file'",
+                              width=60, height=4, bg="#ececec", relief="ridge")
+        self.label.pack(pady=10)
+
+        # Nút chọn file
+        self.select_button = ttk.Button(master, text="Chọn file", command=self.select_files)
+        self.select_button.pack(pady=5)
+
+        # Treeview hiển thị danh sách file
+        self.tree = ttk.Treeview(master, columns=("size", "status"), show="headings")
+        self.tree.heading("size", text="Kích thước (KB)")
+        self.tree.heading("status", text="Trạng thái")
+        self.tree.pack(fill="both", expand=True, padx=10, pady=10)
+
+        self.tree.column("size", width=120)
+        self.tree.column("status", width=150)
+
+        # Cấu hình drop (dành cho Windows/Linux)
+        self.master.drop_target_register(tk.DND_FILES)
+        self.master.dnd_bind('<<Drop>>', self.drop_files)
+
+    def select_files(self):
+        files = filedialog.askopenfilenames(title="Chọn nhiều file để upload")
+        for file in files:
+            self.add_file(file)
+
+    def drop_files(self, event):
+        files = self.master.tk.splitlist(event.data)
+        for file in files:
+            self.add_file(file)
+
+    def add_file(self, file_path):
         if not os.path.isfile(file_path):
-            messagebox.showwarning("Cảnh báo", f"'{os.path.basename(file_path)}' không phải là file hợp lệ!")
-            return False
+            return
+        size_kb = os.path.getsize(file_path) // 1024
+        if size_kb > 50000:  # Giới hạn ví dụ: 50MB
+            messagebox.showwarning("Cảnh báo", f"File quá lớn: {os.path.basename(file_path)}")
+            return
 
-        size_mb = os.path.getsize(file_path) / (1024 * 1024)
-        if size_mb > self.max_size_mb:
-            messagebox.showwarning("Cảnh báo", f"File '{os.path.basename(file_path)}' vượt quá {self.max_size_mb} MB!")
-            return False
+        added = self.file_queue.add_file(file_path)
+        if added:
+            self.tree.insert("", "end", values=(size_kb, "Chờ upload"))
+        else:
+            messagebox.showinfo("Thông báo", f"File '{os.path.basename(file_path)}' đã có trong danh sách.")
 
-        # Kiểm tra định dạng hợp lệ (tuỳ chọn)
-        allowed_ext = {'.jpg', '.png', '.pdf', '.txt', '.zip', '.rar', '.docx', '.mp4'}
-        ext = os.path.splitext(file_path)[1].lower()
-        if ext not in allowed_ext:
-            messagebox.showwarning("Cảnh báo", f"Định dạng file '{ext}' không được hỗ trợ!")
-            return False
-
-        return True
+if __name__ == "__main__":
+    from tkinterdnd2 import TkinterDnD
+    root = TkinterDnD.Tk()
+    app = FileHandlerGUI(root)
+    root.mainloop()
