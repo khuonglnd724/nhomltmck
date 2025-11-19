@@ -17,7 +17,7 @@ CONNECTION_TIMEOUT = 60  # seconds
 # Max file size - áp dụng cho cả client và server
 # Client sẽ từ chối file lớn hơn giới hạn này
 # Server sẽ từ chối file lớn hơn giới hạn này
-MAX_FILE_SIZE_MB = 100  # MB
+MAX_FILE_SIZE_MB = 5000  # MB
 
 # ===========================
 # NETWORK SETTINGS

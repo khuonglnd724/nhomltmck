@@ -42,6 +42,68 @@ UPLOADS_DB = os.path.join(project_dir, "uploads_per_user.json")
 
 
 class MainWindow:
+
+    # Icon động theo phần mở rộng
+    FILE_ICONS = {
+        '.pdf': ('🔴', '#ef4444'),
+        '.doc': ('🔵', '#3b82f6'), '.docx': ('🔵', '#3b82f6'),
+        '.xls': ('🟢', '#22c55e'), '.xlsx': ('🟢', '#22c55e'),
+        '.jpg': ('🟠', '#f59e0b'), '.jpeg': ('🟠', '#f59e0b'), '.png': ('🟠', '#f59e0b'),
+        '.zip': ('🟣', '#a21caf'), '.rar': ('🟣', '#a21caf'),
+        '.mp4': ('🩷', '#ec4899'), '.avi': ('🩷', '#ec4899'),
+        '.mp3': ('🔵', '#06b6d4')
+    }
+
+    def get_file_icon_color(self, filename):
+        ext = os.path.splitext(filename)[1].lower()
+        return self.FILE_ICONS.get(ext, ('📄', '#7c3aed'))
+
+    def on_drag_enter(self, event):
+        try:
+            self.drop_zone.config(bg='#3d3d5c', highlightbackground='#22c55e')
+            if not hasattr(self, 'drag_preview') or not self.drag_preview:
+                self.drag_preview = tk.Toplevel(self.root)
+                self.drag_preview.overrideredirect(True)
+                self.drag_preview.attributes('-topmost', True)
+                self.drag_preview.attributes('-alpha', 0.85)
+                filename = self._get_dragged_filename(event)
+                icon, color = self.get_file_icon_color(filename)
+                frame = tk.Frame(self.drag_preview, bg='white', bd=2, relief='solid')
+                frame.pack()
+                tk.Label(frame, text=icon, font=('Segoe UI Emoji', 32), bg='white', fg=color).pack()
+                tk.Label(frame, text='➕ Thêm file...', font=('Segoe UI', 12, 'bold'), fg='#7c3aed', bg='white').pack()
+                tk.Label(frame, text=filename, font=('Segoe UI', 10), bg='white').pack()
+            self.on_drag_motion(event)
+        except Exception as e:
+            try:
+                self.logger.log(f"⚠️ on_drag_enter error: {e}")
+            except Exception:
+                print(f"on_drag_enter error: {e}")
+
+    def on_drag_motion(self, event):
+        try:
+            if hasattr(self, 'drag_preview') and self.drag_preview:
+                x = self.root.winfo_pointerx()
+                y = self.root.winfo_pointery()
+                self.drag_preview.geometry(f'+{x+20}+{y+20}')
+        except Exception as e:
+            try:
+                self.logger.log(f"⚠️ on_drag_motion error: {e}")
+            except Exception:
+                print(f"on_drag_motion error: {e}")
+
+    def on_drag_leave(self, event):
+        self.drop_zone.config(bg=self.C['bg2'], highlightbackground=self.C['accent'])
+        if hasattr(self, 'drag_preview') and self.drag_preview:
+            self.drag_preview.destroy()
+            self.drag_preview = None
+
+    def _get_dragged_filename(self, event):
+        paths = self.root.tk.splitlist(event.data)
+        if paths:
+            return os.path.basename(paths[0])
+        return 'file'
+
     """Cửa sổ chính ứng dụng upload"""
 
     # Colors
@@ -131,7 +193,24 @@ class MainWindow:
         if HAS_DND:
             try:
                 self.drop_zone.drop_target_register(DND_FILES)
-                self.drop_zone.dnd_bind('<<Drop>>', self.on_drop)
+                # Bind multiple event names to support different tkinterdnd2 versions
+                event_names = [
+                    '<<Drop>>', '<<DragEnter>>', '<<DragLeave>>', '<<DragMotion>>',
+                    '<<DropEnter>>', '<<DropLeave>>', '<<DropPosition>>'
+                ]
+                for ev in event_names:
+                    try:
+                        if ev == '<<Drop>>':
+                            self.drop_zone.dnd_bind(ev, self.on_drop)
+                        elif ev in ('<<DragEnter>>', '<<DropEnter>>'):
+                            self.drop_zone.dnd_bind(ev, self.on_drag_enter)
+                        elif ev in ('<<DragLeave>>', '<<DropLeave>>'):
+                            self.drop_zone.dnd_bind(ev, self.on_drag_leave)
+                        elif ev in ('<<DragMotion>>', '<<DropPosition>>'):
+                            self.drop_zone.dnd_bind(ev, self.on_drag_motion)
+                    except Exception:
+                        # ignore if a particular event name is not supported
+                        pass
                 self.logger.log("✅ Drag & Drop enabled")
             except Exception as e:
                 self.logger.log(f"⚠️ Drag & Drop init failed: {e}")
@@ -195,6 +274,7 @@ class MainWindow:
     # File handling
     # ----------------------------
     def on_drop(self, event):
+        self.on_drag_leave(event)  # Xóa preview, trả lại màu
         paths = self.root.tk.splitlist(event.data)
         for path in paths:
             if os.path.isfile(path):
